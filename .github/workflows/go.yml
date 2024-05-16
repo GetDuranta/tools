@@ -1,0 +1,66 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+name: Duranta Dev Tools
+
+on:
+  push:
+    branches: [ "main", "release" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  id-token: write   # OIDC token is required for AWS AssumeRole
+  contents: read    # This is required for actions/checkout
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22'
+
+    - name: Test
+      run: go test -v ./...
+
+    - name: Build
+      run: make cross-compile
+
+    - name: Configure AWS credentials
+      if: ${{ github.ref_name == 'release' }}
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::590183650763:role/AllowS3UploadsForTools
+        role-session-name: github-actions-tools
+        aws-region: us-west-2
+
+    - name: Upload binaries to S3
+      if: ${{ github.ref_name == 'release' }}
+      run: make upload
+
+
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.ref_name == 'release' }}
+    needs: build
+    steps:
+        - uses: actions/checkout@v4
+          with:
+            repository: 'GetDuranta/homebrew-tools'
+            ref: 'main'
+            ssh-key: ${{ secrets.HOMEBREW_TOOLS_PRIVATE_KEY }}
+
+        - name: Setup git config
+          run: |
+            git config --global user.name "GitHub Actions"
+            git config --global user.email "<>"
+
+        - name: Commit and push generated template
+          run: |
+            ./update-versions.py ddev ${{github.sha}}
+            git add versions.json
+            git commit -m "Automatic: GetDuranta/tools release ${{github.sha}}"
+            git push
