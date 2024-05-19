@@ -10,18 +10,19 @@ cross-compile:
 
 upload:
 	if [ -z "$(GITHUB_SHA)" ]; then echo "GITHUB_SHA env var is not set"; exit 1; fi
+	if [ -z "$(DATE)" ]; then echo "DATE env var is not set"; exit 1; fi
 	aws s3 cp --acl public-read --content-type application/octet-stream \
-		bin/ddev-darwin-amd64 "s3://duranta-tool-artifacts/ddev/$(GITHUB_SHA)/ddev-darwin-amd64"
+		bin/ddev-darwin-amd64 "s3://duranta-tool-artifacts/ddev/$(DATE)$(GITHUB_SHA)/ddev-darwin-amd64" ; \
 	aws s3 cp --acl public-read --content-type application/octet-stream \
-		bin/ddev-darwin-arm64 "s3://duranta-tool-artifacts/ddev/$(GITHUB_SHA)/ddev-darwin-arm64"
+		bin/ddev-darwin-arm64 "s3://duranta-tool-artifacts/ddev/$(DATE)$(GITHUB_SHA)/ddev-darwin-arm64" ; \
 	aws s3 cp --acl public-read --content-type application/octet-stream \
-		bin/ddev-linux-amd64 "s3://duranta-tool-artifacts/ddev/$(GITHUB_SHA)/ddev-linux-amd64"
+		bin/ddev-linux-amd64 "s3://duranta-tool-artifacts/ddev/$(DATE)$(GITHUB_SHA)/ddev-linux-amd64" ; \
 	aws s3 cp --acl public-read --content-type application/octet-stream \
-		bin/ddev-linux-arm64 "s3://duranta-tool-artifacts/ddev/$(GITHUB_SHA)/ddev-linux-arm64"
+		bin/ddev-linux-arm64 "s3://duranta-tool-artifacts/ddev/$(DATE)$(GITHUB_SHA)/ddev-linux-arm64" ; \
 	aws s3 cp --acl public-read --content-type application/octet-stream \
-		bin/ddev-windows-amd64.exe "s3://duranta-tool-artifacts/ddev/$(GITHUB_SHA)/ddev-windows-amd64.exe"
+		bin/ddev-windows-amd64.exe "s3://duranta-tool-artifacts/ddev/$(DATE)$(GITHUB_SHA)/ddev-windows-amd64.exe" ; \
 	aws s3 cp --acl public-read --content-type application/octet-stream \
-		bin/ddev-windows-arm64.exe "s3://duranta-tool-artifacts/ddev/$(GITHUB_SHA)/ddev-windows-arm64.exe"
+		bin/ddev-windows-arm64.exe "s3://duranta-tool-artifacts/ddev/$(DATE)$(GITHUB_SHA)/ddev-windows-arm64.exe"
 
 update-rds-ca-certs:
 	curl -o ddev/cmds/rds-ca-certs.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem

@@ -15,6 +15,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      tool_path: ${{ steps.upload.outputs.tool_path }}
     steps:
     - uses: actions/checkout@v4
 
@@ -37,9 +39,14 @@ jobs:
         role-session-name: github-actions-tools
         aws-region: us-west-2
 
-    - name: Upload binaries to S3
+    - id: upload
+      name: Upload binaries to S3
       if: ${{ github.ref_name == 'release' }}
-      run: make upload
+      run: |
+        export DATE=`git show -s --format=%cd --date=format:'%Y%m%d-%H%M-' $GITHUB_SHA`
+        echo "tool_path=$DATE$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+        echo "tool_path=$DATE$GITHUB_SHA"
+        make upload
 
 
   deploy:
@@ -59,8 +66,10 @@ jobs:
             git config --global user.email "<>"
 
         - name: Commit and push generated template
+          env:
+            TOOL_PATH: ${{needs.build.outputs.tool_path}}
           run: |
-            ./update-versions.py ddev ${{github.sha}}
+            ./update-versions.py ddev $TOOL_PATH
             git add versions.json
             git commit -m "Automatic: GetDuranta/tools release ${{github.sha}}"
             git push
