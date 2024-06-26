@@ -81,8 +81,8 @@ func GetSqlCommand(globalCfg *GlobalConfig) *cobra.Command {
 			)
 
 			if sqlConfig.PrintScript {
-				fmt.Printf("export PGPASSWORD=\"" + dbToken + "\"\n")
-				fmt.Printf("export DSN=\"" + dsn + "\"\n")
+				fmt.Printf("export PGPASSWORD=\"%s\"\n", dbToken)
+				fmt.Printf("export DSN=\"%s\"\n", dsn)
 				return nil
 			}
 
