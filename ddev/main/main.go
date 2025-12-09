@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/spf13/cobra"
 	"log/slog"
 	"os"
 	"tools/ddev/cmds"
+
+	"github.com/spf13/cobra"
 )
 
 func makeCompletionCmd() *cobra.Command {
@@ -48,6 +49,7 @@ func main() {
 
 	rootCmd.AddCommand(cmds.GetShellCommand(&cfg))
 	rootCmd.AddCommand(cmds.GetSqlCommand(&cfg))
+	rootCmd.AddCommand(cmds.GetMigrateCommand(&cfg))
 	rootCmd.AddCommand(makeCompletionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
