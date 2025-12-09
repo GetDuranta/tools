@@ -1,4 +1,4 @@
-module tools
+module github.com/GetDuranta/tools
 
 go 1.25.0
 

@@ -3,8 +3,8 @@ package main
 import (
 	"log/slog"
 	"os"
-	"tools/ddev/cmds"
 
+	"github.com/GetDuranta/tools/ddev/cmds"
 	"github.com/spf13/cobra"
 )
 
