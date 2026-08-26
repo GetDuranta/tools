@@ -7,8 +7,9 @@ import (
 )
 
 type GlobalConfig struct {
-	Profile string
-	Region  string
+	Profile   string
+	Region    string
+	EnvAPIURL string
 }
 
 func loadConfig(cfg *GlobalConfig) (aws.Config, error) {

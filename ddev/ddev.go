@@ -46,10 +46,13 @@ func main() {
 		"set the AWS profile to use")
 	rootCmd.PersistentFlags().StringVarP(&cfg.Region, "region", "r", "",
 		"override the region in profile")
+	rootCmd.PersistentFlags().StringVar(&cfg.EnvAPIURL, "env-api-url", "",
+		"development environment control API URL")
 
 	rootCmd.AddCommand(cmds.GetShellCommand(&cfg))
 	rootCmd.AddCommand(cmds.GetSqlCommand(&cfg))
 	rootCmd.AddCommand(cmds.GetMigrateCommand(&cfg))
+	rootCmd.AddCommand(cmds.GetEnvCommand(&cfg))
 	rootCmd.AddCommand(makeCompletionCmd())
 
 	if err := rootCmd.Execute(); err != nil {

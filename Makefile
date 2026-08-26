@@ -26,3 +26,17 @@ upload:
 
 update-rds-ca-certs:
 	curl -o ddev/cmds/rds-ca-certs.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+
+devenv-gateway:
+	mkdir -p bin
+	CGO_ENABLED=0 go build -trimpath -o bin/devenv-gateway ./cmd/devenv-gateway
+
+devenv-gateway-image:
+	docker build --platform linux/amd64 -f cmd/devenv-gateway/Dockerfile -t devenv-gateway:local .
+
+devenvd:
+	mkdir -p bin
+	CGO_ENABLED=0 go build -trimpath -o bin/devenvd ./devenvd
+
+devenvd-image:
+	docker build --platform linux/amd64 -f devenvd/Dockerfile -t devenvd:local .

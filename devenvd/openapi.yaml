@@ -1,0 +1,322 @@
+openapi: 3.0.3
+info:
+  title: Duranta Dev Environments API
+  version: 1.0.0
+servers:
+  - url: https://api.workspaces.be-dev.getduranta.com
+security:
+  - awsSigV4: []
+paths:
+  /v1/source-uploads:
+    post:
+      operationId: createSourceUpload
+      responses:
+        "201":
+          description: Owner-scoped presigned source archive upload
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bundleKey, url, headers, expiresAt]
+                properties:
+                  bundleKey: {type: string}
+                  url: {type: string, format: uri}
+                  headers:
+                    type: object
+                    additionalProperties: {type: string}
+                  expiresAt: {type: string, format: date-time}
+  /v1/environments:
+    get:
+      operationId: listEnvironments
+      responses:
+        "200":
+          description: Owned environments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [environments]
+                properties:
+                  environments:
+                    type: array
+                    items: {$ref: "#/components/schemas/Environment"}
+    post:
+      operationId: createEnvironment
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateEnvironment"}
+      responses:
+        "202": {$ref: "#/components/responses/MutationAccepted"}
+  /v1/environments/{id}:
+    parameters: [{$ref: "#/components/parameters/EnvironmentId"}]
+    get:
+      operationId: getEnvironment
+      responses:
+        "200":
+          description: Environment
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Environment"}
+    delete:
+      operationId: deleteEnvironment
+      parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
+      responses:
+        "202": {$ref: "#/components/responses/MutationAccepted"}
+  /v1/environments/{id}:start:
+    post:
+      operationId: startEnvironment
+      parameters:
+        - {$ref: "#/components/parameters/EnvironmentId"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                runtimeProfile: {$ref: "#/components/schemas/Profile"}
+      responses:
+        "202": {$ref: "#/components/responses/MutationAccepted"}
+  /v1/environments/{id}:extend:
+    post:
+      operationId: extendEnvironment
+      parameters:
+        - {$ref: "#/components/parameters/EnvironmentId"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [hours]
+              properties:
+                hours: {type: integer, minimum: 1, maximum: 4}
+      responses:
+        "200": {$ref: "#/components/responses/MutationAccepted"}
+  /v1/environments/{id}:stop:
+    post:
+      operationId: stopEnvironment
+      parameters:
+        - {$ref: "#/components/parameters/EnvironmentId"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      responses:
+        "202": {$ref: "#/components/responses/MutationAccepted"}
+  /v1/environments/{id}:archive:
+    post:
+      operationId: archiveEnvironment
+      parameters:
+        - {$ref: "#/components/parameters/EnvironmentId"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                checkpointName: {type: string}
+                pinned: {type: boolean, default: false}
+      responses:
+        "202": {$ref: "#/components/responses/MutationAccepted"}
+  /v1/environments/{id}:browser-link:
+    post:
+      operationId: createBrowserLink
+      parameters: [{$ref: "#/components/parameters/EnvironmentId"}]
+      responses:
+        "200":
+          description: One-time browser bootstrap link, valid for at most 60 seconds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string, format: uri}
+                  expiresAt: {type: string, format: date-time}
+  /v1/operations/{id}:
+    get:
+      operationId: getOperation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Operation"}
+  /v1/checkpoints:
+    get:
+      operationId: listCheckpoints
+      responses:
+        "200":
+          description: Owned checkpoints
+  /v1/checkpoints/{id}:
+    delete:
+      operationId: deleteCheckpoint
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      responses:
+        "202":
+          description: Delete queued
+  /internal/v1/environments/{id}:activity:
+    post:
+      operationId: recordMeaningfulActivity
+      parameters: [{$ref: "#/components/parameters/EnvironmentId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind]
+              properties:
+                kind: {type: string, enum: [terminal, preview, job]}
+      responses:
+        "200":
+          description: Updated environment lease
+  /internal/v1/reconcile:
+    post:
+      operationId: reconcileEnvironments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                limit: {type: integer, minimum: 1, maximum: 100}
+      responses:
+        "200":
+          description: Reconciliation result
+  /internal/v1/gateway/control:
+    post:
+      operationId: gatewayControl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                actorEmail: {type: string, format: email}
+                auditSubject: {type: string}
+                oidcData:
+                  type: string
+                  description: Raw ALB-signed X-Amzn-Oidc-Data token, required except for activity
+                action:
+                  type: string
+                  enum: [list, get, checkpoints, start, extend, stop, archive, delete, delete-checkpoint, browser-link, activity]
+                environmentId: {type: string}
+                checkpointId: {type: string}
+                hours: {type: integer, minimum: 1, maximum: 4}
+      responses:
+        "200": {description: Gateway control result}
+        "202": {description: Gateway mutation accepted}
+components:
+  securitySchemes:
+    awsSigV4:
+      type: apiKey
+      name: Authorization
+      in: header
+      x-amazon-apigateway-authtype: awsSigv4
+  parameters:
+    EnvironmentId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 8, maxLength: 128}
+  responses:
+    MutationAccepted:
+      description: Mutation accepted
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [environment, operation]
+            properties:
+              environment: {$ref: "#/components/schemas/Environment"}
+              operation: {$ref: "#/components/schemas/Operation"}
+              replayed: {type: boolean}
+  schemas:
+    Profile:
+      type: string
+      enum: [standard, gpu-cvml]
+    Visibility:
+      type: string
+      enum: [organization, restricted]
+    Source:
+      type: object
+      additionalProperties: false
+      required: [repository, ref, bundleKey]
+      properties:
+        repository: {type: string}
+        ref: {type: string}
+        bundleKey: {type: string}
+    CreateEnvironment:
+      type: object
+      additionalProperties: false
+      required: [name, source]
+      properties:
+        name: {type: string, minLength: 3, maxLength: 64}
+        runtimeProfile: {$ref: "#/components/schemas/Profile"}
+        visibility: {$ref: "#/components/schemas/Visibility"}
+        source: {$ref: "#/components/schemas/Source"}
+        fromCheckpointId: {type: string}
+    Lease:
+      type: object
+      required: [idleExpiresAt, hardExpiresAt, version]
+      properties:
+        idleExpiresAt: {type: string, format: date-time}
+        hardExpiresAt: {type: string, format: date-time}
+        version: {type: integer, format: int64}
+    Environment:
+      type: object
+      required: [id, name, state, runtimeProfile, visibility, source, lease]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        state: {type: string}
+        runtimeProfile: {$ref: "#/components/schemas/Profile"}
+        visibility: {$ref: "#/components/schemas/Visibility"}
+        source: {$ref: "#/components/schemas/Source"}
+        lease: {$ref: "#/components/schemas/Lease"}
+        instanceId: {type: string}
+        host: {type: string}
+        url: {type: string, format: uri}
+        cleanupAfter: {type: string, format: date-time}
+        recoveryRetryAfter: {type: string, format: date-time}
+        failedAction: {type: string}
+        dirtyShutdown: {type: boolean}
+    Operation:
+      type: object
+      required: [id, action, status, ownerId, requestedAt]
+      properties:
+        id: {type: string}
+        environmentId: {type: string}
+        checkpointId: {type: string}
+        action: {type: string}
+        status: {type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED]}
+        ownerId: {type: string}
+        requestedAt: {type: string, format: date-time}
+        executionArn: {type: string}
