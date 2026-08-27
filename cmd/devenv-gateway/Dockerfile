@@ -8,10 +8,12 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/devenv-gateway ./cmd/devenv-gateway
 
-FROM alpine:3.22
+FROM alpine:3.22 AS certificates
 RUN apk add --no-cache ca-certificates-bundle
-COPY --from=build /out/devenv-gateway /usr/local/bin/devenv-gateway
+
+FROM scratch
+COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /out/devenv-gateway /devenv-gateway
 USER 65532:65532
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD wget -q -O - http://127.0.0.1:8080/health || exit 1
-ENTRYPOINT ["/usr/local/bin/devenv-gateway"]
+ENTRYPOINT ["/devenv-gateway"]
