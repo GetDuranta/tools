@@ -142,3 +142,26 @@ func TestPreviewHostAlwaysKeepsRandomSuffix(t *testing.T) {
 		t.Fatalf("suffix was truncated from %q", host)
 	}
 }
+
+func TestRuntimeCertificateKeepsLongHostOutOfCommonName(t *testing.T) {
+	host := strings.Repeat("a", 63) + ".preview.example.test"
+	commands, err := startRuntimeCommands(
+		AWSExecutorConfig{WorkspacePort: 8443},
+		Environment{},
+		WorkflowResult{Host: host},
+		"https://signed.example.test/source",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(commands, "\n")
+	if !strings.Contains(joined, "-subj /CN='duranta-workspace'") {
+		t.Fatal("runtime certificate is missing its bounded common name")
+	}
+	if !strings.Contains(joined, "-addext 'subjectAltName=DNS:"+host+"'") {
+		t.Fatal("runtime certificate SAN does not contain the full preview host")
+	}
+	if strings.Contains(joined, "-subj /CN='"+host+"'") {
+		t.Fatal("runtime certificate puts the preview host in its common name")
+	}
+}
