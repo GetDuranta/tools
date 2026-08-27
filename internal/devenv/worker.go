@@ -92,8 +92,14 @@ func (w *Worker) HandleOperation(ctx context.Context, event Operation) error {
 	}
 	result, executeErr := w.Executor.Execute(ctx, env, op)
 	var retryable *RetryableError
-	if errors.As(executeErr, &retryable) || errors.Is(executeErr, context.DeadlineExceeded) ||
-		errors.Is(executeErr, context.Canceled) {
+	if errors.As(executeErr, &retryable) {
+		releaseErr := w.Store.ReleaseOperationClaim(ctx, op.ID, claimToken, w.Service.clock.Now().UTC())
+		if releaseErr != nil {
+			return errors.Join(executeErr, fmt.Errorf("release retryable operation claim: %w", releaseErr))
+		}
+		return executeErr
+	}
+	if errors.Is(executeErr, context.DeadlineExceeded) || errors.Is(executeErr, context.Canceled) {
 		return executeErr
 	}
 	if executeErr != nil {

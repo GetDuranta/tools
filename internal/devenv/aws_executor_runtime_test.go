@@ -54,6 +54,21 @@ func TestRemoteRuntimeUsesCloudDependenciesAndPreservesSafetyControls(t *testing
 	if strings.Contains(joined, "tar -x") || strings.Contains(joined, "cp -a /workspace/runtime/source") {
 		t.Fatal("workspace bootstrap bypasses the safe source extractor")
 	}
+	downloadAt := strings.Index(joined, "curl --fail")
+	seedAt := strings.Index(joined, "rsync -aHAX --numeric-ids --partial /var/lib/docker/ /workspace/docker/")
+	if downloadAt < 0 || seedAt < 0 || downloadAt >= seedAt {
+		t.Fatal("workspace bootstrap does not download source before seeding the Docker cache")
+	}
+	for _, expected := range []string{
+		"--output /workspace/runtime/source.tgz.download",
+		"mv /workspace/runtime/source.tgz.download /workspace/runtime/source.tgz.ready",
+		"source-extract.py extract /workspace/runtime/source.tgz.ready",
+		"rsync -aHAX --numeric-ids --partial /var/lib/docker/ /workspace/docker/; touch /workspace/docker/.golden-seeded",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("resumable workspace bootstrap is missing %q", expected)
+		}
+	}
 	watchdog := watchdogScript()
 	for _, expected := range []string{"last-valid-deadline", "missing-deadline", "hard-deadline", "docker compose"} {
 		if !strings.Contains(watchdog, expected) {

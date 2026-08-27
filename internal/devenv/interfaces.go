@@ -132,6 +132,7 @@ type Store interface {
 	ListAllEnvironments(context.Context) ([]Environment, error)
 	GetOperation(context.Context, string) (Operation, error)
 	ClaimOperation(context.Context, string, string, time.Time, time.Duration, int, time.Duration) (Operation, bool, bool, error)
+	ReleaseOperationClaim(context.Context, string, string, time.Time) error
 	GetCheckpoint(context.Context, string) (Checkpoint, error)
 	ListCheckpoints(context.Context, string) ([]Checkpoint, error)
 	ListAllCheckpoints(context.Context) ([]Checkpoint, error)

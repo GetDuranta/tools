@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	managedTag     = "duranta:managed-by"
-	environmentTag = "duranta:environment-id"
-	ownerTag       = "duranta:owner-key"
-	expiresTag     = "duranta:expires-at"
-	resourceTag    = "duranta:resource"
+	managedTag      = "duranta:managed-by"
+	environmentTag  = "duranta:environment-id"
+	ownerTag        = "duranta:owner-key"
+	expiresTag      = "duranta:expires-at"
+	resourceTag     = "duranta:resource"
+	ssmTimeoutGrace = time.Minute
 )
 
 type EC2API interface {
@@ -779,11 +780,20 @@ func (e *AWSExecutor) runCommandOutput(ctx context.Context, instanceID string, c
 	deadline := e.now().Add(e.config.CommandTimeout)
 	var sent *ssm.SendCommandOutput
 	var err error
+	sendTimedOut := false
 	for e.now().Before(deadline) {
+		remaining := deadline.Sub(e.now())
+		if remaining <= ssmTimeoutGrace {
+			sendTimedOut = true
+			break
+		}
+		executionTimeout := int((remaining - ssmTimeoutGrace).Seconds())
 		sent, err = e.ssm.SendCommand(ctx, &ssm.SendCommandInput{
 			DocumentName: aws.String("AWS-RunShellScript"), InstanceIds: []string{instanceID},
-			TimeoutSeconds: aws.Int32(int32(e.config.CommandTimeout.Seconds())),
-			Parameters:     map[string][]string{"commands": commands},
+			TimeoutSeconds: aws.Int32(30),
+			Parameters: map[string][]string{
+				"commands": commands, "executionTimeout": {strconv.Itoa(executionTimeout)},
+			},
 		})
 		if err == nil && sent.Command != nil && sent.Command.CommandId != nil {
 			break
@@ -793,6 +803,9 @@ func (e *AWSExecutor) runCommandOutput(ctx context.Context, instanceID string, c
 		}
 	}
 	if err != nil || sent == nil || sent.Command == nil || sent.Command.CommandId == nil {
+		if sendTimedOut {
+			return "", &RetryableError{Err: errors.New("send SSM command timed out")}
+		}
 		return "", errors.Join(errors.New("send SSM command"), err)
 	}
 	commandID := aws.ToString(sent.Command.CommandId)
@@ -804,8 +817,10 @@ func (e *AWSExecutor) runCommandOutput(ctx context.Context, instanceID string, c
 			switch invocation.Status {
 			case ssmtypes.CommandInvocationStatusSuccess:
 				return aws.ToString(invocation.StandardOutputContent), nil
-			case ssmtypes.CommandInvocationStatusCancelled, ssmtypes.CommandInvocationStatusTimedOut,
-				ssmtypes.CommandInvocationStatusFailed, ssmtypes.CommandInvocationStatusCancelling:
+			case ssmtypes.CommandInvocationStatusTimedOut:
+				return "", &RetryableError{Err: fmt.Errorf("SSM command %s: %s", invocation.Status,
+					strings.TrimSpace(aws.ToString(invocation.StandardErrorContent)))}
+			case ssmtypes.CommandInvocationStatusCancelled, ssmtypes.CommandInvocationStatusFailed:
 				return "", fmt.Errorf("SSM command %s: %s", invocation.Status,
 					strings.TrimSpace(aws.ToString(invocation.StandardErrorContent)))
 			}
@@ -970,20 +985,20 @@ func startRuntimeCommands(config AWSExecutorConfig, env Environment, result Work
 		"uuid=$(blkid -s UUID -o value \"$device\"); grep -q \"UUID=$uuid /workspace \" /etc/fstab || printf 'UUID=%s /workspace ext4 defaults,nofail 0 2\\n' \"$uuid\" >> /etc/fstab",
 		"mountpoint -q /workspace || mount \"$device\" /workspace",
 		"install -d -m 0755 /workspace/runtime /workspace/runtime/tls /workspace/docker",
+		"printf '%s' '" + extractorB64 + "' | base64 -d > /workspace/runtime/source-extract.py; chmod 0700 /workspace/runtime/source-extract.py",
+		"if [ ! -d /workspace/repo/.git ]; then if [ ! -s /workspace/runtime/source.tgz.ready ]; then rm -f /workspace/runtime/source.tgz.download; curl --fail --silent --show-error --location --output /workspace/runtime/source.tgz.download " +
+			shellQuote(sourceURL) +
+			"; mv /workspace/runtime/source.tgz.download /workspace/runtime/source.tgz.ready; fi; rm -rf /workspace/repo.next /workspace/runtime/source; python3 /workspace/runtime/source-extract.py extract /workspace/runtime/source.tgz.ready /workspace/runtime/source 17179869184; GIT_LFS_SKIP_SMUDGE=1 git clone /workspace/runtime/source/source.bundle /workspace/repo.next; GIT_LFS_SKIP_SMUDGE=1 git -C /workspace/repo.next checkout --detach " + shellQuote(ref) + "; python3 /workspace/runtime/source-extract.py apply /workspace/runtime/source/worktree /workspace/runtime/source/deleted /workspace/repo.next; " + setOrigin + "; mv /workspace/repo.next /workspace/repo; rm -f /workspace/runtime/source.tgz.ready; fi",
 		"printf '%s' '" + composeB64 + "' | base64 -d > /workspace/runtime/compose.remote.yml",
 		"printf '%s' '" + dynamicB64 + "' | base64 -d > /workspace/runtime/traefik.dynamic.yml",
 		"if [ ! -s /workspace/runtime/tls/cert.pem ] || [ ! -s /workspace/runtime/tls/key.pem ] || ! openssl x509 -in /workspace/runtime/tls/cert.pem -checkend 86400 -noout >/dev/null 2>&1 || ! openssl x509 -in /workspace/runtime/tls/cert.pem -checkhost " + shellQuote(result.Host) + " -noout >/dev/null 2>&1; then openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 30 -subj /CN='duranta-workspace' -addext " + shellQuote("subjectAltName=DNS:"+result.Host) + " -keyout /workspace/runtime/tls/key.pem -out /workspace/runtime/tls/cert.pem; chmod 0600 /workspace/runtime/tls/key.pem; fi",
 		"systemctl stop docker",
-		"if [ ! -e /workspace/docker/.golden-seeded ]; then cp -a /var/lib/docker/. /workspace/docker/; touch /workspace/docker/.golden-seeded; fi",
+		"if [ ! -e /workspace/docker/.golden-seeded ]; then rsync -aHAX --numeric-ids --partial /var/lib/docker/ /workspace/docker/; touch /workspace/docker/.golden-seeded; fi",
 		"python3 -c 'import json,pathlib; p=pathlib.Path(\"/etc/docker/daemon.json\"); d=json.loads(p.read_text()) if p.exists() and p.read_text().strip() else {}; d[\"data-root\"]=\"/workspace/docker\"; p.write_text(json.dumps(d))'",
 		"install -d -m 0755 /etc/systemd/system/docker.service.d; printf '%s\n' '[Unit]' 'RequiresMountsFor=/workspace' > /etc/systemd/system/docker.service.d/workspace.conf",
 		"printf '%s' '" + watchdogB64 + "' | base64 -d > /usr/local/sbin/duranta-dev-agent; chmod 0755 /usr/local/sbin/duranta-dev-agent",
 		"printf '%s' '" + unitB64 + "' | base64 -d > /etc/systemd/system/duranta-dev-agent.service",
-		"printf '%s' '" + extractorB64 + "' | base64 -d > /workspace/runtime/source-extract.py; chmod 0700 /workspace/runtime/source-extract.py",
 		"systemctl disable --now duranta-bootstrap-watchdog.service 2>/dev/null || true; systemctl daemon-reload; systemctl enable --now docker duranta-dev-agent.service",
-		"if [ ! -d /workspace/repo/.git ]; then rm -rf /workspace/repo.next /workspace/runtime/source; curl --fail --silent --show-error --location --output /workspace/runtime/source.tgz " +
-			shellQuote(sourceURL) +
-			"; python3 /workspace/runtime/source-extract.py extract /workspace/runtime/source.tgz /workspace/runtime/source 17179869184; GIT_LFS_SKIP_SMUDGE=1 git clone /workspace/runtime/source/source.bundle /workspace/repo.next; GIT_LFS_SKIP_SMUDGE=1 git -C /workspace/repo.next checkout --detach " + shellQuote(ref) + "; python3 /workspace/runtime/source-extract.py apply /workspace/runtime/source/worktree /workspace/runtime/source/deleted /workspace/repo.next; " + setOrigin + "; mv /workspace/repo.next /workspace/repo; fi",
 		"id ssm-user >/dev/null 2>&1 || useradd --create-home --shell /bin/bash ssm-user; usermod -aG docker ssm-user; chown -R ssm-user:ssm-user /workspace/repo; chmod 0775 /workspace/runtime",
 		"cd /workspace/repo",
 		composeUpCommand(env),

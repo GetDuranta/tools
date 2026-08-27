@@ -18,6 +18,8 @@ import (
 type captureDynamo struct {
 	DynamoDBAPI
 	transaction *dynamodb.TransactWriteItemsInput
+	update      *dynamodb.UpdateItemInput
+	updateErr   error
 	deleteErr   error
 }
 
@@ -35,6 +37,12 @@ func (c *captureDynamo) TransactWriteItems(_ context.Context, input *dynamodb.Tr
 func (c *captureDynamo) DeleteItem(context.Context, *dynamodb.DeleteItemInput,
 	...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
 	return nil, c.deleteErr
+}
+
+func (c *captureDynamo) UpdateItem(_ context.Context, input *dynamodb.UpdateItemInput,
+	_ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+	c.update = input
+	return &dynamodb.UpdateItemOutput{}, c.updateErr
 }
 
 func TestDynamoCreateReferencesCheckpointInSameTransaction(t *testing.T) {
@@ -127,6 +135,47 @@ func TestStaleLeaseAckReturnsConflict(t *testing.T) {
 	store := NewDynamoStore(client, "state", "owner", "due")
 	if err := store.AckLeaseSchedule(context.Background(), "env-1", 3); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected stale ACK conflict, got %v", err)
+	}
+}
+
+func TestReleaseOperationClaimIsConditionalOnExactClaim(t *testing.T) {
+	client := &captureDynamo{}
+	store := NewDynamoStore(client, "state", "owner", "due")
+	now := time.Date(2026, 8, 28, 12, 0, 0, 123, time.UTC)
+	if err := store.ReleaseOperationClaim(context.Background(), "op-1", "claim-1", now); err != nil {
+		t.Fatal(err)
+	}
+	if got := attributeString(client.update.Key["pk"]); got != "OP#op-1" {
+		t.Fatalf("operation key = %q", got)
+	}
+	condition := aws.ToString(client.update.ConditionExpression)
+	for _, expected := range []string{"operation.#status = :running", "operation.#claim = :claim"} {
+		if !strings.Contains(condition, expected) {
+			t.Fatalf("release condition is missing %q: %s", expected, condition)
+		}
+	}
+	update := aws.ToString(client.update.UpdateExpression)
+	for _, expected := range []string{
+		"operation.#status = :queued", "operation.#updated = :updated",
+		"REMOVE operation.#claim, operation.#claim_until",
+	} {
+		if !strings.Contains(update, expected) {
+			t.Fatalf("release update is missing %q: %s", expected, update)
+		}
+	}
+	if got := attributeString(client.update.ExpressionAttributeValues[":claim"]); got != "claim-1" {
+		t.Fatalf("claim condition = %q", got)
+	}
+	if got := attributeString(client.update.ExpressionAttributeValues[":updated"]); got != now.Format(time.RFC3339Nano) {
+		t.Fatalf("updated timestamp = %q", got)
+	}
+}
+
+func TestReleaseOperationClaimRejectsStaleClaim(t *testing.T) {
+	client := &captureDynamo{updateErr: &types.ConditionalCheckFailedException{}}
+	store := NewDynamoStore(client, "state", "owner", "due")
+	if err := store.ReleaseOperationClaim(context.Background(), "op-1", "stale", time.Now()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected stale claim conflict, got %v", err)
 	}
 }
 

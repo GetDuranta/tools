@@ -283,6 +283,27 @@ func (s *DynamoStore) ClaimOperation(ctx context.Context, id, token string, now 
 	return op, err == nil, exhausted, err
 }
 
+func (s *DynamoStore) ReleaseOperationClaim(ctx context.Context, id, token string, now time.Time) error {
+	_, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: aws.String(s.table), Key: key("OP#"+id, "META"),
+		UpdateExpression: aws.String("SET operation.#status = :queued, operation.#updated = :updated " +
+			"REMOVE operation.#claim, operation.#claim_until"),
+		ConditionExpression: aws.String("operation.#status = :running AND operation.#claim = :claim"),
+		ExpressionAttributeNames: map[string]string{
+			"#status": "Status", "#updated": "UpdatedAt", "#claim": "ClaimToken", "#claim_until": "ClaimUntil",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":queued": avs(string(OperationQueued)), ":running": avs(string(OperationRunning)),
+			":claim": avs(token), ":updated": avs(now.UTC().Format(time.RFC3339Nano)),
+		},
+	})
+	var conditional *types.ConditionalCheckFailedException
+	if errors.As(err, &conditional) {
+		return ErrConflict
+	}
+	return err
+}
+
 func (s *DynamoStore) GetCheckpoint(ctx context.Context, id string) (Checkpoint, error) {
 	output, err := s.client.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(s.table), Key: key("CHECKPOINT#"+id, "META"), ConsistentRead: aws.Bool(true),
