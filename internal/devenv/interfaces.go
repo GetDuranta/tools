@@ -25,7 +25,7 @@ type QuotaLimits struct {
 }
 
 func (q QuotaLimits) Validate() error {
-	if q.MaxOwnerWorkspaces < 1 || q.MaxWorkspaces < 1 || q.MaxRunning < 1 || q.MaxGPURunning < 1 ||
+	if q.MaxOwnerWorkspaces < 1 || q.MaxWorkspaces < 1 || q.MaxRunning < 1 || q.MaxGPURunning < 0 ||
 		q.MaxOwnerCheckpoints < 1 || q.MaxOwnerPinnedCheckpoints < 1 || q.MaxCheckpoints < 1 ||
 		q.MaxPinnedCheckpoints < 1 {
 		return errors.New("quota limits must be positive")

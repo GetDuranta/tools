@@ -97,6 +97,9 @@ func (s *Service) Create(ctx context.Context, identity Identity, req CreateReque
 	if err := req.Profile.Validate(); err != nil {
 		return MutationResult{}, &FieldError{Field: "runtimeProfile", Err: err}
 	}
+	if !s.profileEnabled(req.Profile) {
+		return MutationResult{}, &FieldError{Field: "runtimeProfile", Err: ErrNotReady}
+	}
 	if err := req.Source.Validate(); err != nil {
 		return MutationResult{}, &FieldError{Field: "source", Err: err}
 	}
@@ -768,6 +771,13 @@ func (s *Service) begin(ctx context.Context, identity Identity, id string, actio
 	if env.ActiveOperationID != "" {
 		return MutationResult{}, errors.Join(ErrConflict, errors.New("another operation is active"))
 	}
+	startProfile := env.Profile
+	if profile != nil {
+		startProfile = *profile
+	}
+	if action == ActionStart && !s.profileEnabled(startProfile) {
+		return MutationResult{}, &FieldError{Field: "runtimeProfile", Err: ErrNotReady}
+	}
 	if action == ActionStart && profile != nil && *profile != env.Profile &&
 		(env.State == StateStopped || env.State == StateError || env.InstanceID != "" || env.WorkspaceVolumeID != "") {
 		return MutationResult{}, errors.Join(ErrConflict,
@@ -816,6 +826,10 @@ func (s *Service) begin(ctx context.Context, identity Identity, id string, actio
 		err = s.scheduleLease(ctx, result.Environment)
 	}
 	return result, err
+}
+
+func (s *Service) profileEnabled(profile Profile) bool {
+	return profile != ProfileGPUCVML || s.quotas.MaxGPURunning > 0
 }
 
 func (s *Service) deleteCheckpointAs(ctx context.Context, identity Identity, checkpoint Checkpoint,
