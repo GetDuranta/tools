@@ -1265,6 +1265,10 @@ func globalQuotaTransaction(workspaceDelta, runningDelta, gpuDelta, checkpointDe
 func appendQuotaCondition(conditions *[]string, values map[string]types.AttributeValue,
 	attribute, label string, delta, maximum int) {
 	if delta > 0 {
+		if delta > maximum {
+			*conditions = append(*conditions, "attribute_exists("+attribute+") AND attribute_not_exists("+attribute+")")
+			return
+		}
 		ceiling := ":" + label + "_ceiling"
 		*conditions = append(*conditions, "(attribute_not_exists("+attribute+") OR "+attribute+" <= "+ceiling+")")
 		values[ceiling] = avn(int64(maximum - delta))

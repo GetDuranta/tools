@@ -47,7 +47,7 @@ func main() {
 		MaxOwnerWorkspaces:  integer("MAX_OWNER_WORKSPACES", devenv.DefaultMaxOwnerSlots),
 		MaxWorkspaces:       integer("MAX_WORKSPACES", devenv.DefaultMaxWorkspaces),
 		MaxRunning:          integer("MAX_RUNNING", devenv.DefaultMaxRunning),
-		MaxGPURunning:       integer("MAX_GPU_RUNNING", devenv.DefaultMaxGPURunning),
+		MaxGPURunning:       nonNegativeInteger("MAX_GPU_RUNNING", devenv.DefaultMaxGPURunning),
 		MaxOwnerCheckpoints: integer("MAX_OWNER_CHECKPOINTS", devenv.DefaultMaxOwnerCheckpoints),
 		MaxOwnerPinnedCheckpoints: integer("MAX_OWNER_PINNED_CHECKPOINTS",
 			devenv.DefaultMaxOwnerPinnedCheckpoints),
@@ -163,6 +163,18 @@ func integer(name string, fallback int) int {
 	result, err := strconv.Atoi(raw)
 	if err != nil || result < 1 {
 		log.Fatalf("%s must be a positive integer", name)
+	}
+	return result
+}
+
+func nonNegativeInteger(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	result, err := strconv.Atoi(raw)
+	if err != nil || result < 0 {
+		log.Fatalf("%s must be a non-negative integer", name)
 	}
 	return result
 }
