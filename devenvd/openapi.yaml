@@ -65,7 +65,7 @@ paths:
       parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
       responses:
         "202": {$ref: "#/components/responses/MutationAccepted"}
-  /v1/environments/{id}:start:
+  /v1/environments/{id}/start:
     post:
       operationId: startEnvironment
       parameters:
@@ -81,7 +81,7 @@ paths:
                 runtimeProfile: {$ref: "#/components/schemas/Profile"}
       responses:
         "202": {$ref: "#/components/responses/MutationAccepted"}
-  /v1/environments/{id}:extend:
+  /v1/environments/{id}/extend:
     post:
       operationId: extendEnvironment
       parameters:
@@ -99,7 +99,7 @@ paths:
                 hours: {type: integer, minimum: 1, maximum: 4}
       responses:
         "200": {$ref: "#/components/responses/MutationAccepted"}
-  /v1/environments/{id}:stop:
+  /v1/environments/{id}/stop:
     post:
       operationId: stopEnvironment
       parameters:
@@ -107,7 +107,7 @@ paths:
         - {$ref: "#/components/parameters/IdempotencyKey"}
       responses:
         "202": {$ref: "#/components/responses/MutationAccepted"}
-  /v1/environments/{id}:archive:
+  /v1/environments/{id}/archive:
     post:
       operationId: archiveEnvironment
       parameters:
@@ -124,7 +124,7 @@ paths:
                 pinned: {type: boolean, default: false}
       responses:
         "202": {$ref: "#/components/responses/MutationAccepted"}
-  /v1/environments/{id}:browser-link:
+  /v1/environments/{id}/browser-link:
     post:
       operationId: createBrowserLink
       parameters: [{$ref: "#/components/parameters/EnvironmentId"}]
@@ -171,7 +171,7 @@ paths:
       responses:
         "202":
           description: Delete queued
-  /internal/v1/environments/{id}:activity:
+  /internal/v1/environments/{id}/activity:
     post:
       operationId: recordMeaningfulActivity
       parameters: [{$ref: "#/components/parameters/EnvironmentId"}]

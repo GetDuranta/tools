@@ -136,7 +136,7 @@ func (h *HTTPHandler) Handle(ctx context.Context,
 		return h.handleGatewayControl(ctx, request), nil
 	}
 	resolve := h.Identity.Resolve
-	if request.RouteKey == "POST /internal/v1/environments/{id}:activity" {
+	if request.RouteKey == "POST /internal/v1/environments/{id}/activity" {
 		resolve = h.Identity.ResolveActivity
 	}
 	identity, err := resolve(request)
@@ -175,7 +175,7 @@ func (h *HTTPHandler) Handle(ctx context.Context,
 		if err == nil {
 			return jsonResponse(http.StatusOK, environment), nil
 		}
-	case "POST /v1/environments/{id}:start":
+	case "POST /v1/environments/{id}/start":
 		var body StartRequest
 		if err = decodeOptionalBody(request.Body, &body); err == nil {
 			var result MutationResult
@@ -184,7 +184,7 @@ func (h *HTTPHandler) Handle(ctx context.Context,
 				return jsonResponse(http.StatusAccepted, result), nil
 			}
 		}
-	case "POST /v1/environments/{id}:extend":
+	case "POST /v1/environments/{id}/extend":
 		var body ExtendRequest
 		if err = decodeBody(request.Body, &body); err == nil {
 			var result MutationResult
@@ -193,13 +193,13 @@ func (h *HTTPHandler) Handle(ctx context.Context,
 				return jsonResponse(http.StatusOK, result), nil
 			}
 		}
-	case "POST /v1/environments/{id}:stop":
+	case "POST /v1/environments/{id}/stop":
 		var result MutationResult
 		result, err = h.Service.Stop(ctx, identity, id, header(request.Headers, "Idempotency-Key"))
 		if err == nil {
 			return jsonResponse(http.StatusAccepted, result), nil
 		}
-	case "POST /v1/environments/{id}:archive":
+	case "POST /v1/environments/{id}/archive":
 		var body ArchiveRequest
 		if err = decodeOptionalBody(request.Body, &body); err == nil {
 			var result MutationResult
@@ -232,13 +232,13 @@ func (h *HTTPHandler) Handle(ctx context.Context,
 		if err == nil {
 			return jsonResponse(http.StatusAccepted, operation), nil
 		}
-	case "POST /v1/environments/{id}:browser-link":
+	case "POST /v1/environments/{id}/browser-link":
 		var link BrowserLink
 		link, err = h.Service.BrowserLink(ctx, identity, id)
 		if err == nil {
 			return jsonResponse(http.StatusOK, link), nil
 		}
-	case "POST /internal/v1/environments/{id}:activity":
+	case "POST /internal/v1/environments/{id}/activity":
 		var body ActivityRequest
 		if err = decodeBody(request.Body, &body); err == nil {
 			var environment Environment

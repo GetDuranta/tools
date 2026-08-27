@@ -165,7 +165,7 @@ func envArchiveCommand(global *GlobalConfig) *cobra.Command {
 func envSimpleMutationCommand(global *GlobalConfig, action string) *cobra.Command {
 	return &cobra.Command{Use: action + " <environment-id>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		method := http.MethodPost
-		path := "/v1/environments/" + url.PathEscape(args[0]) + ":" + action
+		path := "/v1/environments/" + url.PathEscape(args[0]) + "/" + action
 		if action == "delete" {
 			method = http.MethodDelete
 			path = "/v1/environments/" + url.PathEscape(args[0])
@@ -190,7 +190,7 @@ func envOpenCommand(global *GlobalConfig) *cobra.Command {
 			return err
 		}
 		var link devenv.BrowserLink
-		if err = client.do(cmd.Context(), http.MethodPost, "/v1/environments/"+url.PathEscape(args[0])+":browser-link", nil, "", &link); err != nil {
+		if err = client.do(cmd.Context(), http.MethodPost, "/v1/environments/"+url.PathEscape(args[0])+"/browser-link", nil, "", &link); err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), link.URL)
@@ -206,7 +206,7 @@ func envSSHCommand(global *GlobalConfig) *cobra.Command {
 		}
 		id := url.PathEscape(args[0])
 		var refreshed devenv.Environment
-		if err = client.do(cmd.Context(), http.MethodPost, "/internal/v1/environments/"+id+":activity",
+		if err = client.do(cmd.Context(), http.MethodPost, "/internal/v1/environments/"+id+"/activity",
 			devenv.ActivityRequest{Kind: "terminal"}, "", &refreshed); err != nil {
 			return err
 		}
@@ -290,7 +290,7 @@ func waitForEnvironment(cmd *cobra.Command, client *envClient, operationID, envi
 			}
 			var link devenv.BrowserLink
 			if err := client.do(cmd.Context(), http.MethodPost,
-				"/v1/environments/"+url.PathEscape(environmentID)+":browser-link", nil, "", &link); err != nil {
+				"/v1/environments/"+url.PathEscape(environmentID)+"/browser-link", nil, "", &link); err != nil {
 				return err
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), link.URL)
@@ -318,7 +318,7 @@ func terminalHeartbeat(cmd *cobra.Command, client *envClient, environmentID stri
 		case <-ticker.C:
 			var environment devenv.Environment
 			if err := client.do(cmd.Context(), http.MethodPost,
-				"/internal/v1/environments/"+url.PathEscape(environmentID)+":activity",
+				"/internal/v1/environments/"+url.PathEscape(environmentID)+"/activity",
 				devenv.ActivityRequest{Kind: "terminal"}, "", &environment); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to refresh environment lease: %v\n", err)
 			}
@@ -333,7 +333,7 @@ func runEnvMutation(cmd *cobra.Command, global *GlobalConfig, id, action string,
 	}
 	var result devenv.MutationResult
 	if err = client.do(cmd.Context(), http.MethodPost,
-		"/v1/environments/"+url.PathEscape(id)+":"+action, body, randomKey(), &result); err != nil {
+		"/v1/environments/"+url.PathEscape(id)+"/"+action, body, randomKey(), &result); err != nil {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\n", result.Environment.State, result.Operation.ID)
