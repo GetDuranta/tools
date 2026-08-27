@@ -9,7 +9,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/devenv-gateway ./cmd/devenv-gateway
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates-bundle
 COPY --from=build /out/devenv-gateway /usr/local/bin/devenv-gateway
 USER 65532:65532
 EXPOSE 8080
