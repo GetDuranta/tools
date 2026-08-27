@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -311,7 +312,11 @@ func (h *HTTPHandler) Handle(ctx context.Context,
 	default:
 		err = ErrNotFound
 	}
-	return errorResponse(err), nil
+	response := errorResponse(err)
+	if response.StatusCode == http.StatusInternalServerError {
+		log.Printf("request failed: route=%q: %v", request.RouteKey, err)
+	}
+	return response, nil
 }
 
 type gatewayControlRequest struct {
