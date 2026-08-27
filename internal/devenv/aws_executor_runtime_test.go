@@ -15,7 +15,10 @@ func TestRemoteRuntimeUsesCloudDependenciesAndPreservesSafetyControls(t *testing
 	config := AWSExecutorConfig{WorkspacePort: 8443, SharedCVMLEndpoint: "https://shared-cvml.example.test"}
 	compose := remoteCompose(config, environment, result)
 	for _, expected := range []string{
-		"--configs=local,dev-stack", "DRNT_DATA_S3_ENDPOINT: \"http://blobs:9000\"",
+		"--configs=local,dev-stack", "start_period: 120s", "DRNT_DATA_S3_ENDPOINT: \"http://blobs:9000\"",
+		"DRNT_DATA_BLOBSBUCKET: \"duranta-blobs-env-1234567890\"",
+		"DRNT_DATA_TILECACHEBUCKET: \"duranta-tile-cache-env-1234567890\"",
+		"DRNT_REPOS_CVML_BLOBBUCKET: \"cvml-transients-env-1234567890\"",
 		"DRNT_SERVICES_CVML_HTTPENDPOINT: \"http://cvml:8082\"", "gpus: all",
 	} {
 		if !strings.Contains(compose, expected) {
@@ -55,6 +58,22 @@ func TestRemoteRuntimeUsesCloudDependenciesAndPreservesSafetyControls(t *testing
 	for _, expected := range []string{"last-valid-deadline", "missing-deadline", "hard-deadline", "docker compose"} {
 		if !strings.Contains(watchdog, expected) {
 			t.Fatalf("watchdog is missing %q", expected)
+		}
+	}
+}
+
+func TestRemoteComposeNamespacesRustFSBucketsPerEnvironment(t *testing.T) {
+	config := AWSExecutorConfig{WorkspacePort: 8443, SharedCVMLEndpoint: "https://shared-cvml.example.test"}
+	result := WorkflowResult{Host: "preview.example.test"}
+	first := remoteCompose(config, Environment{ID: "env-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, result)
+	second := remoteCompose(config, Environment{ID: "env-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, result)
+
+	for _, prefix := range []string{"duranta-blobs-", "duranta-tile-cache-", "cvml-transients-"} {
+		if !strings.Contains(first, prefix+"env-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
+			t.Fatalf("first environment is missing its %s bucket", prefix)
+		}
+		if !strings.Contains(second, prefix+"env-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") {
+			t.Fatalf("second environment is missing its %s bucket", prefix)
 		}
 	}
 }

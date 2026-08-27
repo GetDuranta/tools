@@ -1019,6 +1019,8 @@ func remoteCompose(config AWSExecutorConfig, env Environment, result WorkflowRes
 	}
 	return fmt.Sprintf(`services:
   backend:
+    healthcheck:
+      start_period: 120s
     environment:
       BACKEND_EXTRA_ARGS: "--configs=local,dev-stack --otel=false"
       DRNT_WEB_PUBLICURL: "https://%s/a/"
@@ -1027,6 +1029,9 @@ func remoteCompose(config AWSExecutorConfig, env Environment, result WorkflowRes
       DRNT_SERVICES_CVML_HTTPENDPOINT: "%s"
       DRNT_DATA_S3_CUSTOMSETTINGS: "true"
       DRNT_DATA_S3_ENDPOINT: "http://blobs:9000"
+      DRNT_DATA_BLOBSBUCKET: "duranta-blobs-%s"
+      DRNT_DATA_TILECACHEBUCKET: "duranta-tile-cache-%s"
+      DRNT_REPOS_CVML_BLOBBUCKET: "cvml-transients-%s"
       DRNT_WEB_CDNURLS: "https://%s"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -1043,7 +1048,7 @@ func remoteCompose(config AWSExecutorConfig, env Environment, result WorkflowRes
     depends_on: [backend]
   cvml:
     gpus: all
-`, result.Host, result.Host, cvmlEndpoint, result.Host, config.WorkspacePort)
+`, result.Host, result.Host, cvmlEndpoint, env.ID, env.ID, env.ID, result.Host, config.WorkspacePort)
 }
 
 func previewProxyConfig(host string) string {
