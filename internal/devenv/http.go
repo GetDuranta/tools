@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/GetDuranta/tools/internal/devaccess"
@@ -72,41 +73,61 @@ func (r IAMIdentityResolver) resolve(request events.APIGatewayV2HTTPRequest, all
 }
 
 func hasRolePrefix(roleARN string, prefixes []string) bool {
-	rolePartition, roleAccount, roleName, roleOK := iamRoleName(roleARN)
+	rolePartition, roleAccount, _, roleName, roleOK := iamRole(roleARN)
+	if !roleOK {
+		return false
+	}
 	for _, prefix := range prefixes {
 		prefix = strings.TrimSpace(prefix)
 		if prefix == "" {
 			continue
 		}
-		if strings.HasPrefix(roleARN, prefix) {
-			return true
-		}
-		prefixPartition, prefixAccount, prefixName, prefixOK := iamRoleName(prefix)
+		prefixPartition, prefixAccount, prefixPath, prefixName, prefixOK := iamRole(prefix)
 		if roleOK && prefixOK && rolePartition == prefixPartition && roleAccount == prefixAccount &&
-			strings.HasPrefix(roleName, prefixName) {
+			identityCenterPath.MatchString(prefixPath) && identityCenterPrefix.MatchString(prefixName) &&
+			matchesGeneratedRoleName(roleName, prefixName) {
 			return true
 		}
 	}
 	return false
 }
 
-func iamRoleName(raw string) (partition, accountID, name string, ok bool) {
+var identityCenterPath = regexp.MustCompile(`^aws-reserved/sso\.amazonaws\.com/(?:[a-z]{2}(?:-gov)?-[a-z]+-[0-9]/)?$`)
+var identityCenterPrefix = regexp.MustCompile(`^AWSReservedSSO_[A-Za-z0-9+=,.@_-]+_$`)
+
+func iamRole(raw string) (partition, accountID, path, name string, ok bool) {
 	parts := strings.SplitN(raw, ":", 6)
 	if len(parts) != 6 || parts[0] != "arn" || parts[1] == "" || parts[2] != "iam" ||
-		parts[3] != "" || parts[4] == "" {
-		return "", "", "", false
+		parts[3] != "" || len(parts[4]) != 12 || strings.Trim(parts[4], "0123456789") != "" {
+		return "", "", "", "", false
 	}
 	resource, found := strings.CutPrefix(parts[5], "role/")
 	if !found {
-		return "", "", "", false
+		return "", "", "", "", false
 	}
+	path = ""
+	name = resource
 	if slash := strings.LastIndexByte(resource, '/'); slash >= 0 {
-		resource = resource[slash+1:]
+		path = resource[:slash+1]
+		name = resource[slash+1:]
 	}
-	if resource == "" {
-		return "", "", "", false
+	if name == "" {
+		return "", "", "", "", false
 	}
-	return parts[1], parts[4], resource, true
+	return parts[1], parts[4], path, name, true
+}
+
+func matchesGeneratedRoleName(name, prefix string) bool {
+	suffix, found := strings.CutPrefix(name, prefix)
+	if !found || len(suffix) != 16 {
+		return false
+	}
+	for _, char := range suffix {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", char) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r IAMIdentityResolver) ResolveGatewayActor(request events.APIGatewayV2HTTPRequest,
