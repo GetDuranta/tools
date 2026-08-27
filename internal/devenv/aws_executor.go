@@ -1196,7 +1196,7 @@ func launchTagSpecifications(env Environment, operationID string) []ec2types.Tag
 func primaryNetworkInterface(subnetID, securityGroupID string) ec2types.InstanceNetworkInterfaceSpecification {
 	return ec2types.InstanceNetworkInterfaceSpecification{
 		DeviceIndex: aws.Int32(0), SubnetId: aws.String(subnetID), Groups: []string{securityGroupID},
-		AssociatePublicIpAddress: aws.Bool(false), DeleteOnTermination: aws.Bool(true),
+		AssociatePublicIpAddress: aws.Bool(false), Ipv6AddressCount: aws.Int32(0), DeleteOnTermination: aws.Bool(true),
 	}
 }
 

@@ -117,7 +117,8 @@ func TestPrimaryNetworkInterfaceIsPrivateAndEphemeral(t *testing.T) {
 	configuration := primaryNetworkInterface("subnet-private", "sg-workspace")
 	if aws.ToInt32(configuration.DeviceIndex) != 0 || aws.ToString(configuration.SubnetId) != "subnet-private" ||
 		len(configuration.Groups) != 1 || configuration.Groups[0] != "sg-workspace" ||
-		aws.ToBool(configuration.AssociatePublicIpAddress) || !aws.ToBool(configuration.DeleteOnTermination) {
+		aws.ToBool(configuration.AssociatePublicIpAddress) || aws.ToInt32(configuration.Ipv6AddressCount) != 0 ||
+		!aws.ToBool(configuration.DeleteOnTermination) {
 		t.Fatalf("unsafe primary network interface: %#v", configuration)
 	}
 	if err := (AWSExecutorConfig{
