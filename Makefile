@@ -32,11 +32,11 @@ devenv-gateway:
 	CGO_ENABLED=0 go build -trimpath -o bin/devenv-gateway ./cmd/devenv-gateway
 
 devenv-gateway-image:
-	docker build --platform linux/amd64 -f cmd/devenv-gateway/Dockerfile -t devenv-gateway:local .
+	docker build --platform linux/amd64 --provenance=false -f cmd/devenv-gateway/Dockerfile -t devenv-gateway:local .
 
 devenvd:
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -o bin/devenvd ./devenvd
 
 devenvd-image:
-	docker build --platform linux/amd64 -f devenvd/Dockerfile -t devenvd:local .
+	docker build --platform linux/amd64 --provenance=false -f devenvd/Dockerfile -t devenvd:local .
