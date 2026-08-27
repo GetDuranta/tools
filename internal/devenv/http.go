@@ -72,12 +72,41 @@ func (r IAMIdentityResolver) resolve(request events.APIGatewayV2HTTPRequest, all
 }
 
 func hasRolePrefix(roleARN string, prefixes []string) bool {
+	rolePartition, roleAccount, roleName, roleOK := iamRoleName(roleARN)
 	for _, prefix := range prefixes {
-		if prefix = strings.TrimSpace(prefix); prefix != "" && strings.HasPrefix(roleARN, prefix) {
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" {
+			continue
+		}
+		if strings.HasPrefix(roleARN, prefix) {
+			return true
+		}
+		prefixPartition, prefixAccount, prefixName, prefixOK := iamRoleName(prefix)
+		if roleOK && prefixOK && rolePartition == prefixPartition && roleAccount == prefixAccount &&
+			strings.HasPrefix(roleName, prefixName) {
 			return true
 		}
 	}
 	return false
+}
+
+func iamRoleName(raw string) (partition, accountID, name string, ok bool) {
+	parts := strings.SplitN(raw, ":", 6)
+	if len(parts) != 6 || parts[0] != "arn" || parts[1] == "" || parts[2] != "iam" ||
+		parts[3] != "" || parts[4] == "" {
+		return "", "", "", false
+	}
+	resource, found := strings.CutPrefix(parts[5], "role/")
+	if !found {
+		return "", "", "", false
+	}
+	if slash := strings.LastIndexByte(resource, '/'); slash >= 0 {
+		resource = resource[slash+1:]
+	}
+	if resource == "" {
+		return "", "", "", false
+	}
+	return parts[1], parts[4], resource, true
 }
 
 func (r IAMIdentityResolver) ResolveGatewayActor(request events.APIGatewayV2HTTPRequest,
