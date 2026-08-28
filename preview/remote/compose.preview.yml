@@ -1,0 +1,209 @@
+services:
+  db_init:
+    image: localhost/duranta-preview/backend:golden
+    environment:
+      DATABASE_URL_PREFIX: postgresql://app:password@db:6543
+    volumes:
+      - ${DURANTA_APP_DIR}:/src:z
+      - go_compile_cache:/root/.cache
+    working_dir: /src/backend
+    command: [task, "db:setup"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [duranta]
+    restart: "no"
+
+  backend:
+    image: localhost/duranta-preview/backend:golden
+    environment:
+      SOURCE_VERSION: preview
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel_collector:4317
+      BACKEND_EXTRA_ARGS: --configs=local,with-logto,preview
+      DATABASE_URL_PREFIX: postgresql://app:password@db:6543
+    volumes:
+      - ${DURANTA_APP_DIR}:/src:z
+      - ${DURANTA_RUNTIME_DIR}/preview.yaml:/src/config/preview.yaml:ro,z
+      - go_compile_cache:/root/.cache
+    working_dir: /src/backend
+    command: [task, -w, run]
+    ports:
+      - 127.0.0.1:18443:8443
+    extra_hosts:
+      - logto.${PREVIEW_HOSTNAME}:host-gateway
+      - s3.${PREVIEW_HOSTNAME}:host-gateway
+    depends_on:
+      db_init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      blobs:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, task, healthcheck]
+      interval: 3s
+      timeout: 2s
+      retries: 40
+    networks: [duranta]
+
+  frontend:
+    image: localhost/duranta-preview/frontend:golden
+    environment:
+      FRONTEND_PUBLIC_ORIGIN: https://${PREVIEW_HOSTNAME}
+      PREVIEW_HOSTNAME: ${PREVIEW_HOSTNAME}
+    volumes:
+      - ${DURANTA_APP_DIR}:/src:z
+      - ${DURANTA_RUNTIME_DIR}/vite.preview.mjs:/preview/vite.preview.mjs:ro,z
+      - npm_package_cache:/root/.npm
+    working_dir: /src/frontend
+    command:
+      - bash
+      - -lc
+      - WEBAPP_DIR=/src/frontend task prepare-deps && cd /src/frontend/website && npx react-router dev . --mode live --host 0.0.0.0 --config /preview/vite.preview.mjs
+    networks: [duranta]
+
+  proto:
+    image: localhost/duranta-preview/proto:golden
+    volumes:
+      - ${DURANTA_APP_DIR}:/src:z
+    working_dir: /src/proto
+    networks: [duranta]
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    healthcheck:
+      test: [CMD, redis-cli, --raw, incr, ping]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+    networks: [duranta]
+
+  db:
+    image: localhost/duranta-preview/postgis:golden
+    restart: unless-stopped
+    shm_size: 512mb
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: password
+      PGPORT: 6543
+    command: [postgres, -c, wal_level=logical, -c, enable_seqscan=off]
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -d postgres -U app -p 6543]
+      start_period: 10s
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    networks: [duranta]
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:26.4.4-alpine
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      CLICKHOUSE_USER: clicky
+      CLICKHOUSE_PASSWORD: clicky
+      CLICKHOUSE_DB: clicky
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:8123/ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    networks: [duranta]
+
+  blobs:
+    image: docker.io/rustfs/rustfs:1.0.0-beta.10
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_SERVER_DOMAINS: s3.${PREVIEW_HOSTNAME}
+    volumes:
+      - blob_data:/data
+    ports:
+      - 127.0.0.1:19000:9000
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://127.0.0.1:9001/rustfs/console/index.html"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    networks: [duranta]
+
+  logto:
+    image: docker.io/cyberaxduranta/duranta-logto-fork:1.41.0-duranta.6
+    restart: unless-stopped
+    environment:
+      DB_URL: postgres://app:password@db:6543/logto
+      ENDPOINT: https://logto.${PREVIEW_HOSTNAME}
+      ADMIN_ENDPOINT: https://logto-admin.${PREVIEW_HOSTNAME}
+      TRUST_PROXY_HEADER: "1"
+      SEED_FLAG_FILE: /tmp/.seed_loaded
+      LOGTO_EXTRA_SPA_ORIGINS: https://${PREVIEW_HOSTNAME}
+      LOGTO_BRAND_LOGO_URL: https://${PREVIEW_HOSTNAME}/static/images/logo.svg
+      LOGTO_M2M_APP_ID: duranta-m2m-local
+      LOGTO_M2M_APP_SECRET: ${LOGTO_M2M_APP_SECRET}
+      SMS_PIT_ENDPOINT: http://smspit:2525/
+    entrypoint: [sh, /logto-sandbox/start.sh]
+    volumes:
+      - /opt/duranta-preview/logto-sandbox:/logto-sandbox:ro,z
+    ports:
+      - 127.0.0.1:13001:3001
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, sh, /logto-sandbox/healthcheck.sh]
+      start_period: 180s
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [duranta]
+
+  mailpit:
+    image: docker.io/axllent/mailpit:latest
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - 127.0.0.1:18025:8025
+    networks: [duranta]
+
+  smspit:
+    image: localhost/duranta-preview/smspit:golden
+    restart: unless-stopped
+    networks: [duranta]
+
+  uptrace:
+    image: docker.io/uptrace/uptrace:2.1.0-beta.7
+    restart: unless-stopped
+    volumes:
+      - ${DURANTA_RUNTIME_DIR}/uptrace.yml:/etc/uptrace/config.yml:ro,z
+    ports:
+      - 127.0.0.1:13443:3443
+    depends_on: [clickhouse, db, redis]
+    networks: [duranta]
+
+  otel_collector:
+    image: docker.io/otel/opentelemetry-collector-contrib:0.155.0
+    restart: unless-stopped
+    volumes:
+      - ${DURANTA_APP_DIR}/tools/uptrace/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro,z
+    depends_on: [uptrace]
+    networks: [duranta]
+
+volumes:
+  db_data:
+  blob_data:
+  npm_package_cache:
+  go_compile_cache:
+  clickhouse_data:
+
+networks:
+  duranta:
+    driver: bridge

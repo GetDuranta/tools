@@ -1,0 +1,29 @@
+{$PREVIEW_HOSTNAME} {
+	reverse_proxy https://127.0.0.1:18443 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+logto.{$PREVIEW_HOSTNAME} {
+	reverse_proxy http://127.0.0.1:13001
+}
+
+s3.{$PREVIEW_HOSTNAME} {
+	reverse_proxy http://127.0.0.1:19000
+}
+
+mailpit.{$PREVIEW_HOSTNAME} {
+	basic_auth {
+		preview {$DIAGNOSTICS_PASSWORD_HASH}
+	}
+	reverse_proxy http://127.0.0.1:18025
+}
+
+uptrace.{$PREVIEW_HOSTNAME} {
+	basic_auth {
+		preview {$DIAGNOSTICS_PASSWORD_HASH}
+	}
+	reverse_proxy http://127.0.0.1:13443
+}
