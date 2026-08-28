@@ -38,6 +38,8 @@ test('bake rejects accelerated and non-Standard builders', () => {
 test('builder blocks API stop and removes protection before termination', async () => {
   const source = await readFile(new URL('./bake.mjs', import.meta.url), 'utf8');
   assert.match(source, /'--disable-api-stop'/);
+  assert.match(source, /'--count', '1'/);
+  assert.doesNotMatch(source, /'--min-count'|'--max-count'/);
   const unprotect = source.indexOf("'modify-instance-attribute', '--instance-id', instanceId, '--no-disable-api-stop'");
   const terminate = source.indexOf("'terminate-instances', '--instance-ids', instanceId");
   assert.ok(unprotect >= 0 && terminate > unprotect);

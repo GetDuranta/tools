@@ -9,7 +9,7 @@ export const DEFAULTS = Object.freeze({
   volumeSize: 200,
   ttl: '48h',
   domain: 'duranta-preview.com',
-  sshUser: 'ec2-user',
+  sshUser: 'ubuntu',
   managedBy: 'duranta-preview',
 });
 
@@ -313,8 +313,7 @@ export function buildRunInstancesArgs({
     'ec2', 'run-instances',
     '--image-id', amiId,
     '--instance-type', instanceType,
-    '--min-count', '1',
-    '--max-count', '1',
+    '--count', '1',
     '--client-token', clientToken,
     '--network-interfaces', JSON.stringify([{
       AssociatePublicIpAddress: true,

@@ -100,6 +100,8 @@ Data:
     Endpoint: $s3_endpoint
     AccessKeyId: $rustfs_access_key
     SecretAccessKey: $rustfs_secret_key
+  BlobsBucket: duranta-blobs-preview
+  TileCacheBucket: duranta-tile-cache-preview
   SessionRecCH: ''
 Services:
   Cvml:
@@ -107,6 +109,9 @@ Services:
   Sendgrid:
     Enabled: false
     ApiKey: ''
+Repos:
+  Cvml:
+    BlobBucket: duranta-cvml-preview
 EOF
 
 cat >"$app_dir/.env.local" <<EOF
@@ -137,7 +142,7 @@ PREVIEW_HOSTNAME=$hostname
 DIAGNOSTICS_PASSWORD_HASH=$diagnostics_hash
 EOF
 chmod 0600 "$runtime_dir/caddy.env"
-chown ec2-user:ec2-user \
+chown ubuntu:ubuntu \
   "$runtime_dir/compose.env" \
   "$runtime_dir/preview.yaml" \
   "$runtime_dir/uptrace.yml" \

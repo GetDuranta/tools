@@ -157,6 +157,9 @@ test('run-instances arguments enforce disposable and hardened settings', () => {
   });
   assert.equal(args[0], 'ec2');
   assert.equal(args[1], 'run-instances');
+  assert.equal(args[args.indexOf('--count') + 1], '1');
+  assert.equal(args.includes('--min-count'), false);
+  assert.equal(args.includes('--max-count'), false);
   assert.equal(args[args.indexOf('--instance-initiated-shutdown-behavior') + 1], 'terminate');
   const metadata = JSON.parse(args[args.indexOf('--metadata-options') + 1]);
   assert.equal(metadata.HttpTokens, 'required');
@@ -300,13 +303,13 @@ test('setup refuses to adopt untagged IAM resources', () => {
 
 test('SSH uses SSM, Instance Connect target, and agent forwarding', () => {
   const args = buildSshArgs(
-    { profile: 'preview', region: 'us-west-2', sshUser: 'ec2-user' },
+    { profile: 'preview', region: 'us-west-2', sshUser: 'ubuntu' },
     { InstanceId: 'i-123' },
     '/tmp/key',
   );
   assert.equal(args[0], '-A');
   assert.ok(args.some((value) => value.includes('ssm start-session')));
-  assert.ok(args.includes('ec2-user@i-123'));
+  assert.ok(args.includes('ubuntu@i-123'));
   assert.ok(args.includes('/tmp/key'));
 });
 

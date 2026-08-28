@@ -38,7 +38,7 @@ sudo cat /var/lib/duranta-preview/diagnostics-credentials
 - `https://uptrace.<preview-hostname>`
 - `https://mailpit.<preview-hostname>`
 
-The stack runs as `ec2-user` with rootless Podman. Docker Compose v2 is installed only as Podman's compose provider; there is no Docker engine. Caddy is the only process binding public ports, while application services bind to loopback.
+The stack runs as `ubuntu` with rootless Podman. Docker Compose v2 is installed only as Podman's compose provider; there is no Docker engine. Caddy is the only process binding public ports, while application services bind to loopback.
 
 The frontend Vite configuration and local Logto bootstrap use compatibility shims outside the app checkout. CVML is not built or started in the CPU-only MVP, so AI-backed actions are unavailable.
 

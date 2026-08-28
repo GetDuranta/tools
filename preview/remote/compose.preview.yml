@@ -60,7 +60,7 @@ services:
     working_dir: /src/frontend
     command:
       - bash
-      - -lc
+      - -c
       - WEBAPP_DIR=/src/frontend task prepare-deps && cd /src/frontend/website && npx react-router dev . --mode live --host 0.0.0.0 --config /preview/vite.preview.mjs
     networks: [duranta]
 
@@ -92,7 +92,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql
     healthcheck:
-      test: [CMD-SHELL, pg_isready -d postgres -U app -p 6543]
+      test: [CMD-SHELL, "grep -qx postgres /proc/1/comm && pg_isready -d postgres -U app -p 6543"]
       start_period: 10s
       interval: 3s
       timeout: 2s
@@ -122,7 +122,6 @@ services:
       RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
       RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
       RUSTFS_CONSOLE_ENABLE: "true"
-      RUSTFS_SERVER_DOMAINS: s3.${PREVIEW_HOSTNAME}
     volumes:
       - blob_data:/data
     ports:
@@ -186,7 +185,13 @@ services:
       - ${DURANTA_RUNTIME_DIR}/uptrace.yml:/etc/uptrace/config.yml:ro,z
     ports:
       - 127.0.0.1:13443:3443
-    depends_on: [clickhouse, db, redis]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      db_init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     networks: [duranta]
 
   otel_collector:

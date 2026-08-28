@@ -19,9 +19,9 @@ const DEFAULTS = Object.freeze({
   region: 'us-west-2',
   instanceType: 'm7i.4xlarge',
   volumeSize: 200,
-  sshUser: 'ec2-user',
+  sshUser: 'ubuntu',
   keep: 2,
-  baseAmiParameter: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64',
+  baseAmiParameter: '/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id',
   goldenAmiParameter: '/duranta-preview/golden-ami-id',
   subnetParameter: '/duranta-preview/subnet-id',
   securityGroupParameter: '/duranta-preview/security-group-id',
@@ -42,7 +42,7 @@ Options:
   --region <region>                AWS region (default: us-west-2)
   --instance-type <type>           Builder type (default: m7i.4xlarge)
   --volume-size <GiB>              Builder root volume (default: 200)
-  --base-ami <ami-id>              Override the public Amazon Linux 2023 parameter
+  --base-ami <ami-id>              Override the public Ubuntu 26.04 parameter
   --subnet-id <subnet-id>          Override /duranta-preview/subnet-id
   --security-group-id <sg-id>      Override /duranta-preview/security-group-id
   --instance-profile <name>        Override /duranta-preview/instance-profile
@@ -477,7 +477,7 @@ async function bakeCommand(config) {
       'ec2', 'run-instances',
       '--image-id', resolved.baseAmi,
       '--instance-type', resolved.instanceType,
-      '--min-count', '1', '--max-count', '1',
+      '--count', '1',
       '--network-interfaces', JSON.stringify([{
         AssociatePublicIpAddress: true,
         DeleteOnTermination: true,
