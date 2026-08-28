@@ -13,6 +13,14 @@ test('public runtime keeps containers rootless and waits for local Logto', async
   assert.match(compose, /RUSTFS_ACCESS_KEY: \$\{RUSTFS_ACCESS_KEY\}/);
   assert.doesNotMatch(compose, /RUSTFS_SERVER_DOMAINS/);
   assert.match(compose, /frontend:[\s\S]*?- bash\n\s+- -c\n/);
+  assert.match(compose, /PREVIEW_FRONTEND_MODE: \$\{PREVIEW_FRONTEND_MODE:-production\}/);
+  assert.match(compose, /production\)[\s\S]*?react-router build[\s\S]*?vite preview/);
+  assert.match(compose, /find build\/client -type f -name '\*\.map' -delete/);
+  assert.match(compose, /dev\)[\s\S]*?react-router dev/);
+  const caddy = await read('./Caddyfile');
+  assert.match(caddy, /\{\$PREVIEW_HOSTNAME\} \{\n\s+encode zstd gzip/);
+  const vite = await read('./vite.preview.mjs');
+  assert.match(vite, /build: \{\n\s+sourcemap: false/);
 });
 
 test('bootstrap fails closed and replaces inherited shared credentials', async () => {

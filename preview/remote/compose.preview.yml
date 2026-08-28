@@ -52,6 +52,7 @@ services:
     image: localhost/duranta-preview/frontend:golden
     environment:
       FRONTEND_PUBLIC_ORIGIN: https://${PREVIEW_HOSTNAME}
+      PREVIEW_FRONTEND_MODE: ${PREVIEW_FRONTEND_MODE:-production}
       PREVIEW_HOSTNAME: ${PREVIEW_HOSTNAME}
     volumes:
       - ${DURANTA_APP_DIR}:/src:z
@@ -61,7 +62,28 @@ services:
     command:
       - bash
       - -c
-      - WEBAPP_DIR=/src/frontend task prepare-deps && cd /src/frontend/website && npx react-router dev . --mode live --host 0.0.0.0 --config /preview/vite.preview.mjs
+      - |
+        set -euo pipefail
+        WEBAPP_DIR=/src/frontend task prepare-deps
+        cd /src/frontend/website
+        case "$$PREVIEW_FRONTEND_MODE" in
+          production)
+            npx react-router build . --mode live --config /preview/vite.preview.mjs
+            find build/client -type f -name '*.map' -delete
+            if find build/client -type f -name '*.map' -print -quit | grep -q .; then
+              echo "Client source maps remain after cleanup" >&2
+              exit 1
+            fi
+            exec npx vite preview --config /preview/vite.preview.mjs
+            ;;
+          dev)
+            exec npx react-router dev . --mode live --host 0.0.0.0 --config /preview/vite.preview.mjs
+            ;;
+          *)
+            echo "Unknown PREVIEW_FRONTEND_MODE: $$PREVIEW_FRONTEND_MODE" >&2
+            exit 2
+            ;;
+        esac
     networks: [duranta]
 
   proto:

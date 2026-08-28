@@ -41,6 +41,19 @@ wait_for_url() {
   return 1
 }
 
+set_frontend_mode() {
+  local mode="$1" temporary
+  if grep -q '^PREVIEW_FRONTEND_MODE=' "$env_file"; then
+    temporary="$(mktemp)"
+    sed "s/^PREVIEW_FRONTEND_MODE=.*/PREVIEW_FRONTEND_MODE=$mode/" "$env_file" >"$temporary"
+    cat "$temporary" >"$env_file"
+    rm -f "$temporary"
+  else
+    printf '\nPREVIEW_FRONTEND_MODE=%s\n' "$mode" >>"$env_file"
+  fi
+  "${compose[@]}" up -d --no-deps --force-recreate frontend
+}
+
 case "${1:-}" in
   up)
     "${compose[@]}" up -d --no-build --remove-orphans
@@ -62,8 +75,14 @@ case "${1:-}" in
     /usr/local/bin/duranta-preview-build-images
     "${compose[@]}" up -d --no-build --remove-orphans
     ;;
+  frontend-dev)
+    set_frontend_mode dev
+    ;;
+  frontend-production)
+    set_frontend_mode production
+    ;;
   *)
-    echo "Usage: duranta-preview-stack {up|down|status|logs|rebuild}" >&2
+    echo "Usage: duranta-preview-stack {up|down|status|logs|rebuild|frontend-dev|frontend-production}" >&2
     exit 2
     ;;
 esac

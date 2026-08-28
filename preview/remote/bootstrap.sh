@@ -58,6 +58,7 @@ COMPOSE_PROJECT_NAME=duranta-preview
 DURANTA_APP_DIR=$app_dir
 DURANTA_RUNTIME_DIR=$runtime_dir
 PREVIEW_HOSTNAME=$hostname
+PREVIEW_FRONTEND_MODE=production
 RUSTFS_ACCESS_KEY=$rustfs_access_key
 RUSTFS_SECRET_KEY=$rustfs_secret_key
 LOGTO_M2M_APP_SECRET=$logto_m2m_secret

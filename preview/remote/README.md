@@ -27,6 +27,8 @@ duranta-preview-stack down
 duranta-preview-stack up
 sudo /usr/local/bin/duranta-preview-ttl show
 sudo /usr/local/bin/duranta-preview-ttl extend 12h
+duranta-preview-stack frontend-dev
+duranta-preview-stack frontend-production
 ```
 
 Diagnostics are protected with generated Basic Auth credentials:
@@ -40,6 +42,6 @@ sudo cat /var/lib/duranta-preview/diagnostics-credentials
 
 The stack runs as `ubuntu` with rootless Podman. Docker Compose v2 is installed only as Podman's compose provider; there is no Docker engine. Caddy is the only process binding public ports, while application services bind to loopback.
 
-The frontend Vite configuration and local Logto bootstrap use compatibility shims outside the app checkout. CVML is not built or started in the CPU-only MVP, so AI-backed actions are unavailable.
+The public frontend uses a production bundle without source maps by default. `frontend-dev` explicitly enables the remote Vite development server and HMR; `frontend-production` rebuilds the safe public bundle. The Vite configuration and local Logto bootstrap use compatibility shims outside the app checkout. CVML is not built or started in the CPU-only MVP, so AI-backed actions are unavailable.
 
 The on-host timer terminates the instance at its deadline. The root EBS volume is deleted, and there is no EC2 stop, snapshot, resume, or persisted development state. Push work before the deadline. SSH agent forwarding exposes the laptop agent to the host only while the connection is open; disconnect when finished.
