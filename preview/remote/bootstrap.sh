@@ -2,18 +2,12 @@
 set -euo pipefail
 
 hostname=""
-issue=""
-owner=""
-hosted_zone_id=""
 expires_at=""
 prepare_only=false
 
 while (($#)); do
   case "$1" in
     --hostname) hostname="${2:-}"; shift 2 ;;
-    --issue) issue="${2:-}"; shift 2 ;;
-    --owner) owner="${2:-}"; shift 2 ;;
-    --hosted-zone-id) hosted_zone_id="${2:-}"; shift 2 ;;
     --expires-at) expires_at="${2:-}"; shift 2 ;;
     --prepare-only) prepare_only=true; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
@@ -22,20 +16,10 @@ done
 
 [[ "$hostname" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || { echo "Invalid hostname" >&2; exit 2; }
 [[ "$hostname" != *..* && ${#hostname} -le 253 ]] || { echo "Invalid hostname" >&2; exit 2; }
-[[ "$issue" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Invalid issue" >&2; exit 2; }
-[[ "$owner" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "Invalid owner" >&2; exit 2; }
-if [[ "$prepare_only" == false ]]; then
-  [[ "$hosted_zone_id" =~ ^[A-Z0-9]+$ ]] || { echo "Invalid hosted zone ID" >&2; exit 2; }
-fi
 now_epoch="$(date -u +%s)"
 deadline_epoch="$(date -u -d "$expires_at" +%s)" || { echo "Invalid expiration" >&2; exit 2; }
 ((deadline_epoch > now_epoch)) || { echo "Expiration must be in the future" >&2; exit 2; }
 expires_at="$(date -u -d "@$deadline_epoch" +%Y-%m-%dT%H:%M:%SZ)"
-safety_deadline_epoch="$deadline_epoch"
-if [[ "$prepare_only" == false ]] && ((safety_deadline_epoch > now_epoch + 3600)); then
-  safety_deadline_epoch=$((now_epoch + 3600))
-fi
-safety_expires_at="$(date -u -d "@$safety_deadline_epoch" +%Y-%m-%dT%H:%M:%SZ)"
 
 runtime_dir=/opt/duranta-preview/runtime
 app_dir=/opt/duranta-preview/app
@@ -47,9 +31,13 @@ certificate_work_dir=$certificate_root/work
 certificate_logs_dir=$certificate_root/logs
 certificate_live_dir=$certificate_config_dir/live/$certificate_name
 install -d -m 0755 "$runtime_dir" "$state_dir"
-printf '%s\n' "$safety_expires_at" >"$state_dir/deadline"
-chmod 0600 "$state_dir/deadline"
 if [[ "$prepare_only" == false ]]; then
+  safety_deadline_epoch=$((now_epoch + 3600))
+  if ((deadline_epoch < safety_deadline_epoch)); then
+    safety_deadline_epoch="$deadline_epoch"
+  fi
+  safety_expires_at="$(date -u -d "@$safety_deadline_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+  /usr/local/bin/duranta-preview-expiry set "$safety_expires_at"
   systemctl enable --now duranta-preview-expiry.timer
 fi
 
@@ -166,17 +154,7 @@ fi
 
 token="$(curl -fsS -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token)"
 metadata=(-fsS -H "X-aws-ec2-metadata-token: $token")
-instance_id="$(curl "${metadata[@]}" http://169.254.169.254/latest/meta-data/instance-id)"
 public_ip="$(curl "${metadata[@]}" http://169.254.169.254/latest/meta-data/public-ipv4)"
-cat >"$state_dir/instance.env" <<EOF
-PREVIEW_HOSTNAME=$hostname
-ISSUE=$issue
-OWNER=$owner
-HOSTED_ZONE_ID=$hosted_zone_id
-INSTANCE_ID=$instance_id
-PUBLIC_IP=$public_ip
-EOF
-chmod 0600 "$state_dir/instance.env"
 
 dns_ready=false
 for _ in {1..120}; do
@@ -217,8 +195,7 @@ systemctl enable caddy
 systemctl reload-or-restart caddy
 systemctl enable duranta-preview-stack.service
 systemctl restart duranta-preview-stack.service
-printf '%s\n' "$expires_at" >"$state_dir/deadline"
-chmod 0600 "$state_dir/deadline"
+/usr/local/bin/duranta-preview-expiry set "$expires_at"
 
 echo "Preview: https://$hostname/a/"
 echo "Diagnostics credentials: sudo cat $state_dir/diagnostics-credentials"

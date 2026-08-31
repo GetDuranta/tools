@@ -58,6 +58,7 @@ case "${1:-}" in
   up)
     "${compose[@]}" up -d --no-build --remove-orphans
     wait_for_url https://127.0.0.1:18443/healthcheck
+    wait_for_url https://127.0.0.1:18443/a/
     wait_for_url http://127.0.0.1:13001/oidc/.well-known/openid-configuration
     wait_for_url http://127.0.0.1:13443/
     ;;

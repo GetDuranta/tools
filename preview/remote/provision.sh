@@ -11,17 +11,10 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y \
   caddy ca-certificates certbot curl dbus-user-session ec2-instance-connect git git-lfs \
-  jq nodejs openssl podman rsync slirp4netns fuse-overlayfs sudo tar uidmap unzip
+  nodejs openssl podman rsync slirp4netns fuse-overlayfs sudo tar uidmap
 
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT
-if ! command -v aws >/dev/null; then
-  aws_cli_version=2.36.33
-  curl -fsSLo "$temporary/awscliv2.zip" \
-    "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${aws_cli_version}.zip"
-  unzip -q "$temporary/awscliv2.zip" -d "$temporary"
-  "$temporary/aws/install"
-fi
 
 compose_version=5.1.3
 install -d -m 0755 /usr/local/lib/docker/cli-plugins
@@ -55,7 +48,6 @@ run_as_preview podman version
 run_as_preview env PODMAN_COMPOSE_PROVIDER=/usr/local/bin/docker-compose podman compose version
 caddy version
 task --version
-aws --version
 
 install -d -m 0755 -o ubuntu -g ubuntu /opt/duranta-preview
 if [[ ! -d /opt/duranta-preview/app/.git ]]; then
@@ -88,11 +80,9 @@ install -m 0644 /tmp/duranta-preview-remote/duranta-preview-stack.service /etc/s
 install -m 0644 /tmp/duranta-preview-remote/duranta-preview-expiry.service /etc/systemd/system/
 install -m 0644 /tmp/duranta-preview-remote/duranta-preview-expiry.timer /etc/systemd/system/
 install -m 0755 /tmp/duranta-preview-remote/bootstrap.sh /usr/local/bin/duranta-preview-bootstrap
-install -m 0755 /tmp/duranta-preview-remote/ttl.mjs /usr/local/bin/duranta-preview-ttl
+install -m 0755 /tmp/duranta-preview-remote/expiry.mjs /usr/local/bin/duranta-preview-expiry
 install -m 0755 /tmp/duranta-preview-remote/stack.sh /usr/local/bin/duranta-preview-stack
 install -m 0755 /tmp/duranta-preview-remote/build-images.sh /usr/local/bin/duranta-preview-build-images
-install -m 0755 /tmp/duranta-preview-remote/dns-cleanup.sh /usr/local/lib/duranta-preview/
-install -m 0755 /tmp/duranta-preview-remote/expire.sh /usr/local/lib/duranta-preview/
 systemctl daemon-reload
 systemctl disable --now caddy duranta-preview-stack.service || true
 systemctl stop duranta-preview-expiry.timer || true
@@ -113,8 +103,6 @@ done
 run_as_preview /usr/local/bin/duranta-preview-build-images
 /usr/local/bin/duranta-preview-bootstrap \
   --hostname warm.invalid \
-  --issue warm \
-  --owner image \
   --expires-at 2099-01-01T00:00:00Z \
   --prepare-only
 if ! run_as_preview /usr/local/bin/duranta-preview-stack up; then

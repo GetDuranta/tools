@@ -4,4 +4,4 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/lib/duranta-preview/expire.sh
+ExecStart=/usr/local/bin/duranta-preview-expiry
