@@ -56,7 +56,7 @@ Usage:
   preview.mjs create <issue> [options]
   preview.mjs list [--json]
   preview.mjs show <name> [--json]
-  preview.mjs connect <name> [--identity <key>]
+  preview.mjs connect <name> [--identity <key>] [--no-agent-forwarding]
   preview.mjs open <name>
   preview.mjs extend <name> <duration> [--identity <key>]
   preview.mjs terminate <name> [--yes]
@@ -93,12 +93,15 @@ Create options:
   --volume-size <GiB>           Default: 200
   --ttl <duration>              Default: 48h
 
+Connect options:
+  --no-agent-forwarding         Disable SSH agent forwarding
+
 Configuration can also use DURANTA_PREVIEW_* environment variables and the
 conventional SSM parameters under /duranta-preview/. Setup never mutates AWS
 unless --apply is present.
 `;
 
-const BOOLEAN_OPTIONS = new Set(['help', 'json', 'yes', 'apply']);
+const BOOLEAN_OPTIONS = new Set(['help', 'json', 'yes', 'apply', 'no-agent-forwarding']);
 const VALUE_OPTIONS = new Set([
   'profile', 'region', 'domain', 'owner', 'hosted-zone-id', 'subnet-id',
   'security-group-id', 'instance-profile', 'role-name', 'ami-id', 'vpc-id',
@@ -509,7 +512,13 @@ function runSsh(aws, config, instance, options, remoteArgs = [], capture = false
     writeFileSync(identityFile, `${key.publicKey}\n`, { mode: 0o600 });
   }
   try {
-    const result = spawnSync('ssh', buildSshArgs(config, instance, identityFile, remoteArgs), capture
+    const result = spawnSync('ssh', buildSshArgs(
+      config,
+      instance,
+      identityFile,
+      remoteArgs,
+      { forwardAgent: !options.noAgentForwarding },
+    ), capture
       ? { encoding: 'utf8', timeout: 120000 }
       : { stdio: 'inherit' });
     if (result.error) throw new CliError(`Unable to run ssh: ${result.error.message}`);
@@ -1153,7 +1162,7 @@ export async function main(argv = process.argv.slice(2)) {
       showPreview(aws, config, positionals[0], options);
       break;
     case 'connect':
-      requirePositionals(command, positionals, 1, 'connect <name> [--identity <key>]');
+      requirePositionals(command, positionals, 1, 'connect <name> [--identity <key>] [--no-agent-forwarding]');
       connectPreview(aws, config, positionals[0], options);
       break;
     case 'open':

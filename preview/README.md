@@ -68,6 +68,12 @@ git checkout <branch-or-sha>
 duranta-preview-stack rebuild
 ```
 
+The default connection forwards the laptop SSH agent for private Git access. After fetching the required ref, disconnect and reconnect without forwarding before building or running PR code:
+
+```sh
+./preview/preview.mjs connect dur-5542.vitalii.duranta-preview.com --no-agent-forwarding
+```
+
 For a restart without rebuilding images:
 
 ```sh
@@ -97,7 +103,7 @@ There is no EC2 stop, snapshot, resume, or preserved development state. API stop
 
 At prices checked on 2026-08-28, one default Oregon host is approximately **$20.01 per 24 hours** or **$40.01 for 48 hours**, including `m7i.4xlarge`, 200 GiB gp3, and one public IPv4 address. AWS pricing, data transfer, and DNS charges can change.
 
-`connect` sends a public key through EC2 Instance Connect for a short-lived authorization and opens SSH through SSM. The private key stays on the laptop. SSH agent forwarding lets the remote checkout and AMI builder use the developer's GitHub access, but a compromised remote host could use the forwarded agent during that session. Disconnect when finished and do not connect to an untrusted image.
+`connect` sends a public key through EC2 Instance Connect for a short-lived authorization and opens SSH through SSM. The private key stays on the laptop. SSH agent forwarding lets the remote checkout and AMI builder use the developer's GitHub access, but a compromised remote host could use the forwarded agent during that session. Use `--no-agent-forwarding` after private Git operations, disconnect when finished, and do not connect to an untrusted image.
 
 Diagnostics URLs are `https://uptrace.<hostname>` and `https://mailpit.<hostname>`. Read their generated credentials after connecting:
 

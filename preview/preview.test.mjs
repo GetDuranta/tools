@@ -313,6 +313,18 @@ test('SSH uses SSM, Instance Connect target, and agent forwarding', () => {
   assert.ok(args.includes('/tmp/key'));
 });
 
+test('SSH can explicitly disable agent forwarding', () => {
+  const args = buildSshArgs(
+    { profile: 'preview', region: 'us-west-2', sshUser: 'ubuntu' },
+    { InstanceId: 'i-123' },
+    '/tmp/key',
+    [],
+    { forwardAgent: false },
+  );
+  assert.equal(args[0], '-a');
+  assert.equal(args.includes('-A'), false);
+});
+
 test('selects one agent public key so SSH can constrain offered identities', () => {
   const first = 'ssh-ed25519 AAAAfirst developer@example.com';
   const selected = publicKeyFromIdentity(null, () => ({
@@ -426,6 +438,10 @@ test('parses command options without evaluating values', () => {
   ]), {
     positionals: ['create', 'DUR-5542'],
     options: { owner: 'vitalii', ttl: '2d', profile: 'preview' },
+  });
+  assert.deepEqual(parseCliArgs(['connect', 'dur-5542.vitalii.duranta-preview.com', '--no-agent-forwarding']), {
+    positionals: ['connect', 'dur-5542.vitalii.duranta-preview.com'],
+    options: { noAgentForwarding: true },
   });
   assert.throws(() => parseCliArgs(['list', '--wat']), /Unknown option/);
 });
