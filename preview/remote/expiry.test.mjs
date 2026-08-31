@@ -17,33 +17,34 @@ async function fixture() {
   const shutdown = join(directory, 'shutdown');
   await writeFile(shutdown, '#!/bin/sh\nprintf called >"$DURANTA_PREVIEW_SHUTDOWN_MARKER"\n');
   await chmod(shutdown, 0o755);
-  const env = {
-    ...process.env,
-    DURANTA_PREVIEW_DEADLINE: deadline,
-    DURANTA_PREVIEW_SHUTDOWN_MARKER: marker,
-    PATH: `${directory}:${process.env.PATH}`,
+  return {
+    deadline,
+    directory,
+    marker,
+    env: {
+      ...process.env,
+      DURANTA_PREVIEW_DEADLINE: deadline,
+      DURANTA_PREVIEW_SHUTDOWN_MARKER: marker,
+      PATH: `${directory}:${process.env.PATH}`,
+    },
   };
-  return { deadline, directory, env, marker };
 }
 
-test('expiry helper stores a future deadline and leaves the host running', async (context) => {
-  const item = await fixture();
-  context.after(() => rm(item.directory, { recursive: true, force: true }));
+test('expiry keeps a future host alive and shuts down an expired host', async (context) => {
+  const future = await fixture();
+  const expired = await fixture();
+  context.after(() => Promise.all([
+    rm(future.directory, { recursive: true, force: true }),
+    rm(expired.directory, { recursive: true, force: true }),
+  ]));
+
   const deadline = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  await execFileAsync(process.execPath, [helper, 'set', deadline], { env: future.env });
+  await execFileAsync(process.execPath, [helper], { env: future.env });
+  assert.equal((await readFile(future.deadline, 'utf8')).trim(), deadline);
+  await assert.rejects(access(future.marker));
 
-  await execFileAsync(process.execPath, [helper, 'set', deadline], { env: item.env });
-  await execFileAsync(process.execPath, [helper], { env: item.env });
-
-  assert.equal((await readFile(item.deadline, 'utf8')).trim(), deadline);
-  await assert.rejects(access(item.marker));
-});
-
-test('expiry helper shuts the host down after the deadline', async (context) => {
-  const item = await fixture();
-  context.after(() => rm(item.directory, { recursive: true, force: true }));
-  await writeFile(item.deadline, '2000-01-01T00:00:00.000Z\n');
-
-  await execFileAsync(process.execPath, [helper], { env: item.env });
-
-  assert.equal(await readFile(item.marker, 'utf8'), 'called');
+  await writeFile(expired.deadline, '2000-01-01T00:00:00.000Z\n');
+  await execFileAsync(process.execPath, [helper], { env: expired.env });
+  assert.equal(await readFile(expired.marker, 'utf8'), 'called');
 });
