@@ -40,6 +40,12 @@ safety_expires_at="$(date -u -d "@$safety_deadline_epoch" +%Y-%m-%dT%H:%M:%SZ)"
 runtime_dir=/opt/duranta-preview/runtime
 app_dir=/opt/duranta-preview/app
 state_dir=/var/lib/duranta-preview
+certificate_root=/var/lib/caddy/preview-tls
+certificate_name=duranta-preview
+certificate_config_dir=$certificate_root/config
+certificate_work_dir=$certificate_root/work
+certificate_logs_dir=$certificate_root/logs
+certificate_live_dir=$certificate_config_dir/live/$certificate_name
 install -d -m 0755 "$runtime_dir" "$state_dir"
 printf '%s\n' "$safety_expires_at" >"$state_dir/deadline"
 chmod 0600 "$state_dir/deadline"
@@ -141,6 +147,8 @@ chmod 0600 "$state_dir/diagnostics-credentials"
 cat >"$runtime_dir/caddy.env" <<EOF
 PREVIEW_HOSTNAME=$hostname
 DIAGNOSTICS_PASSWORD_HASH=$diagnostics_hash
+PREVIEW_CERTIFICATE=$certificate_live_dir/fullchain.pem
+PREVIEW_PRIVATE_KEY=$certificate_live_dir/privkey.pem
 EOF
 chmod 0600 "$runtime_dir/caddy.env"
 chown ubuntu:ubuntu \
@@ -184,6 +192,26 @@ done
   echo "DNS did not resolve $hostname and logto.$hostname to $public_ip" >&2
   exit 1
 }
+
+systemctl stop caddy
+install -d -m 0700 "$certificate_root"
+certbot certonly \
+  --non-interactive \
+  --agree-tos \
+  --register-unsafely-without-email \
+  --standalone \
+  --preferred-challenges http \
+  --config-dir "$certificate_config_dir" \
+  --work-dir "$certificate_work_dir" \
+  --logs-dir "$certificate_logs_dir" \
+  --cert-name "$certificate_name" \
+  --keep-until-expiring \
+  --domain "$hostname" \
+  --domain "logto.$hostname" \
+  --domain "s3.$hostname" \
+  --domain "mailpit.$hostname" \
+  --domain "uptrace.$hostname"
+chown -R caddy:caddy "$certificate_root"
 
 systemctl enable caddy
 systemctl reload-or-restart caddy

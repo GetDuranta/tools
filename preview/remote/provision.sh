@@ -10,7 +10,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y \
-  caddy ca-certificates curl dbus-user-session ec2-instance-connect git git-lfs \
+  caddy ca-certificates certbot curl dbus-user-session ec2-instance-connect git git-lfs \
   jq nodejs openssl podman rsync slirp4netns fuse-overlayfs sudo tar uidmap unzip
 
 temporary="$(mktemp -d)"

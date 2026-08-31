@@ -166,8 +166,8 @@ async function validateLocalTools() {
   ]);
 }
 
-async function getParameter(config, name) {
-  const response = await aws(config, ['ssm', 'get-parameter', '--name', name]);
+async function getParameter(config, name, awsClient = aws) {
+  const response = await awsClient(config, ['ssm', 'get-parameter', '--name', name]);
   const value = response.Parameter?.Value;
   if (!value) throw new Error(`SSM parameter ${name} is empty`);
   return value;
@@ -263,13 +263,129 @@ async function listCommand(config) {
   else printImages(images);
 }
 
-async function currentGoldenAmi(config) {
+async function currentGoldenAmi(config, awsClient = aws) {
   try {
-    return await getParameter(config, config.goldenAmiParameter);
+    return await getParameter(config, config.goldenAmiParameter, awsClient);
   } catch (error) {
     if (String(error.message).includes('ParameterNotFound')) return null;
     throw error;
   }
+}
+
+class RetryableRollbackError extends Error {}
+class UnsafeRollbackError extends Error {}
+
+function isRetryableRollbackError(error) {
+  return error instanceof RetryableRollbackError
+    || /InvalidSnapshot\.InUse|IncorrectState|RequestLimitExceeded|Throttl|Unavailable|InternalError|timed out|ECONNRESET/i.test(String(error.message));
+}
+
+function isMissingAmi(error) {
+  return /InvalidAMIID\.NotFound/i.test(String(error.message));
+}
+
+function isMissingSnapshot(error) {
+  return /InvalidSnapshot\.NotFound/i.test(String(error.message));
+}
+
+async function retryRollback(action, options) {
+  let lastError;
+  for (let attempt = 0; attempt < options.attempts; attempt += 1) {
+    try {
+      return await action();
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableRollbackError(error) || attempt === options.attempts - 1) throw error;
+      await options.delay(options.delayMs);
+    }
+  }
+  throw lastError;
+}
+
+function assertOwnedGoldenResource(resource, ownerId, label) {
+  const tags = tagsFromAws(resource.Tags);
+  if (resource.OwnerId !== ownerId) {
+    throw new UnsafeRollbackError(`Refusing to remove ${label}: owner does not match`);
+  }
+  for (const [key, expected] of [['ManagedBy', 'duranta-preview'], ['Purpose', 'golden']]) {
+    if (tags[key] === undefined) {
+      throw new RetryableRollbackError(`${label} tag ${key} is not visible yet`);
+    }
+    if (tags[key] !== expected) {
+      throw new UnsafeRollbackError(`Refusing to remove ${label}: tag ${key} does not match`);
+    }
+  }
+}
+
+export async function rollbackUnpublishedImage(config, imageId, ownerId, options = {}) {
+  const awsClient = options.aws ?? aws;
+  const retryOptions = {
+    attempts: options.attempts ?? 60,
+    delayMs: options.delayMs ?? 10_000,
+    delay: options.delay ?? ((milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))),
+  };
+  if (await retryRollback(() => currentGoldenAmi(config, awsClient), retryOptions) === imageId) {
+    return { published: true, snapshots: [] };
+  }
+
+  const image = await retryRollback(async () => {
+    let response;
+    try {
+      response = await awsClient(config, ['ec2', 'describe-images', '--image-ids', imageId]);
+    } catch (error) {
+      if (!isMissingAmi(error)) throw error;
+      throw new RetryableRollbackError(`AMI ${imageId} is not visible yet`);
+    }
+    const found = response.Images?.find(({ ImageId }) => ImageId === imageId);
+    if (!found) throw new RetryableRollbackError(`AMI ${imageId} is not visible yet`);
+    assertOwnedGoldenResource(found, ownerId, `AMI ${imageId}`);
+    if (!imageSummary(found).snapshots.length && found.State !== 'failed') {
+      throw new RetryableRollbackError(`AMI ${imageId} snapshots are not visible yet`);
+    }
+    return found;
+  }, retryOptions);
+  const snapshotIds = imageSummary(image).snapshots;
+
+  for (const snapshotId of snapshotIds) {
+    await retryRollback(async () => {
+      let response;
+      try {
+        response = await awsClient(config, ['ec2', 'describe-snapshots', '--snapshot-ids', snapshotId]);
+      } catch (error) {
+        if (!isMissingSnapshot(error)) throw error;
+        throw new RetryableRollbackError(`Snapshot ${snapshotId} is not visible yet`);
+      }
+      const snapshot = response.Snapshots?.find(({ SnapshotId }) => SnapshotId === snapshotId);
+      if (!snapshot) throw new RetryableRollbackError(`Snapshot ${snapshotId} is not visible yet`);
+      assertOwnedGoldenResource(snapshot, ownerId, `snapshot ${snapshotId}`);
+    }, retryOptions);
+  }
+
+  if (await retryRollback(() => currentGoldenAmi(config, awsClient), retryOptions) === imageId) {
+    return { published: true, snapshots: [] };
+  }
+
+  await retryRollback(async () => {
+    try {
+      await awsClient(config, ['ec2', 'deregister-image', '--image-id', imageId]);
+    } catch (error) {
+      if (!isMissingAmi(error)) throw error;
+    }
+  }, retryOptions);
+
+  for (const snapshotId of snapshotIds) {
+    await retryRollback(async () => {
+      if (!await snapshotIsUnreferenced(config, snapshotId, awsClient)) {
+        throw new RetryableRollbackError(`Snapshot ${snapshotId} is still referenced`);
+      }
+      try {
+        await awsClient(config, ['ec2', 'delete-snapshot', '--snapshot-id', snapshotId]);
+      } catch (error) {
+        if (!isMissingSnapshot(error)) throw error;
+      }
+    }, retryOptions);
+  }
+  return { published: false, snapshots: snapshotIds };
 }
 
 async function safeSnapshotIds(config, image, ownerId) {
@@ -284,8 +400,8 @@ async function safeSnapshotIds(config, image, ownerId) {
   }).map(({ SnapshotId }) => SnapshotId);
 }
 
-async function snapshotIsUnreferenced(config, snapshotId) {
-  const response = await aws(config, [
+async function snapshotIsUnreferenced(config, snapshotId, awsClient = aws) {
+  const response = await awsClient(config, [
     'ec2', 'describe-images', '--owners', 'self', '--filters',
     `Name=block-device-mapping.snapshot-id,Values=${snapshotId}`,
   ]);
@@ -436,7 +552,8 @@ async function terminateBuilder(config, instanceId) {
 
 async function bakeCommand(config) {
   await validateLocalTools();
-  await aws(config, ['sts', 'get-caller-identity']);
+  const ownerId = (await aws(config, ['sts', 'get-caller-identity'])).Account;
+  if (!ownerId) throw new Error('Could not resolve the AWS account ID');
   const resolved = await resolveBakeConfig(config);
   const quota = await validateStandardQuota(resolved);
   console.log(JSON.stringify({
@@ -467,6 +584,8 @@ async function bakeCommand(config) {
     key.identityArgs.push('-o', 'IdentitiesOnly=yes', '-i', identity);
   }
   let instanceId = null;
+  let imageId = null;
+  let imagePublished = false;
   try {
     const tags = [
       { Key: 'Name', Value: 'duranta-preview-ami-builder' },
@@ -554,13 +673,14 @@ async function bakeCommand(config) {
         { ResourceType: 'snapshot', Tags: imageTags },
       ]),
     ]);
-    const imageId = created.ImageId;
+    imageId = created.ImageId;
     if (!imageId) throw new Error('create-image did not return an AMI ID');
     await run('aws', awsArgs(resolved, ['ec2', 'wait', 'image-available', '--image-ids', imageId]), { timeout: 60 * 60_000 });
     await aws(resolved, [
       'ssm', 'put-parameter', '--name', resolved.goldenAmiParameter,
       '--type', 'String', '--value', imageId, '--overwrite',
     ]);
+    imagePublished = true;
     console.log(`Published ${name} (${imageId}) to ${resolved.goldenAmiParameter}`);
     await pruneCommand({ ...resolved, apply: true, keep: resolved.keep, json: false });
   } finally {
@@ -569,6 +689,19 @@ async function bakeCommand(config) {
         await terminateBuilder(resolved, instanceId);
       } catch (error) {
         console.error(`Failed to terminate builder ${instanceId}: ${error.message}`);
+        process.exitCode = 1;
+      }
+    }
+    if (imageId && !imagePublished) {
+      try {
+        const result = await rollbackUnpublishedImage(resolved, imageId, ownerId);
+        if (result.published) {
+          console.warn(`Kept ${imageId} because ${resolved.goldenAmiParameter} points to it`);
+        } else {
+          console.warn(`Removed unpublished ${imageId} and ${result.snapshots.length} snapshot(s)`);
+        }
+      } catch (error) {
+        console.error(`Failed to remove unpublished AMI ${imageId}: ${error.message}`);
         process.exitCode = 1;
       }
     }

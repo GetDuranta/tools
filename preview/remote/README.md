@@ -2,6 +2,8 @@
 
 The golden AMI is built from a clean `main` checkout and warmed Podman images and volumes. Runtime hostnames and credentials are generated at boot. Certificates, machine identity, SSH host keys, AWS credentials, and GitHub credentials are excluded from the image.
 
+At boot, Certbot obtains one HTTP-01 certificate whose SANs cover the app, Logto, S3, Mailpit, and Uptrace hostnames. Caddy loads that certificate for every public route. The certificate outlives the 48-hour disposable host, so no renewal state is preserved.
+
 ## Work on a target ref
 
 ```sh

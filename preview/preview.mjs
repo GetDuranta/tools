@@ -139,6 +139,10 @@ export function parseCliArgs(argv) {
   return { positionals, options };
 }
 
+export function shouldForwardSshAgent(command, options = {}) {
+  return command === 'connect' && !options.noAgentForwarding;
+}
+
 function envValue(name, env = process.env) {
   return env[`DURANTA_PREVIEW_${name}`];
 }
@@ -502,7 +506,7 @@ function injectSshKey(aws, config, instance, options) {
   return key;
 }
 
-function runSsh(aws, config, instance, options, remoteArgs = [], capture = false) {
+function runSsh(aws, config, instance, options, remoteArgs = [], { capture = false, forwardAgent = false } = {}) {
   const key = injectSshKey(aws, config, instance, options);
   let temporaryDirectory;
   let identityFile = key.identityFile;
@@ -517,7 +521,7 @@ function runSsh(aws, config, instance, options, remoteArgs = [], capture = false
       instance,
       identityFile,
       remoteArgs,
-      { forwardAgent: !options.noAgentForwarding },
+      { forwardAgent },
     ), capture
       ? { encoding: 'utf8', timeout: 120000 }
       : { stdio: 'inherit' });
@@ -639,7 +643,9 @@ function showPreview(aws, config, name, options) {
 
 function connectPreview(aws, config, name, options) {
   const instance = resolveManagedInstance(aws, name);
-  runSsh(aws, config, instance, options);
+  runSsh(aws, config, instance, options, [], {
+    forwardAgent: shouldForwardSshAgent('connect', options),
+  });
 }
 
 function openPreview(aws, config, name) {
@@ -660,7 +666,10 @@ function extendPreview(aws, config, name, duration, options) {
     instance,
     options,
     ['sudo', '/usr/local/bin/duranta-preview-ttl', 'extend', canonicalDuration(duration)],
-    true,
+    {
+      capture: true,
+      forwardAgent: shouldForwardSshAgent('extend', options),
+    },
   );
   const matches = output.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g);
   const expiration = matches?.at(-1);

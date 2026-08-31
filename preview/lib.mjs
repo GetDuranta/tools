@@ -495,7 +495,7 @@ export function buildSendSshPublicKeyArgs(instance, sshUser, publicKey) {
   ];
 }
 
-export function buildSshArgs(config, instance, identityFile, remoteArgs = [], { forwardAgent = true } = {}) {
+export function buildSshArgs(config, instance, identityFile, remoteArgs = [], { forwardAgent = false } = {}) {
   const args = [
     forwardAgent ? '-A' : '-a',
     '-o', `ProxyCommand=${buildSsmProxyCommand(config)}`,

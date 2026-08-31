@@ -18,9 +18,26 @@ test('public runtime keeps containers rootless and waits for local Logto', async
   assert.match(compose, /find build\/client -type f -name '\*\.map' -delete/);
   assert.match(compose, /dev\)[\s\S]*?react-router dev/);
   const caddy = await read('./Caddyfile');
-  assert.match(caddy, /\{\$PREVIEW_HOSTNAME\} \{\n\s+encode zstd gzip/);
+  assert.match(caddy, /^\{\$PREVIEW_HOSTNAME\},\nlogto\.\{\$PREVIEW_HOSTNAME\},\ns3\.\{\$PREVIEW_HOSTNAME\},\nmailpit\.\{\$PREVIEW_HOSTNAME\},\nuptrace\.\{\$PREVIEW_HOSTNAME\} \{/);
+  assert.match(caddy, /tls \{\$PREVIEW_CERTIFICATE\} \{\$PREVIEW_PRIVATE_KEY\}/);
+  assert.equal(caddy.match(/^\s*tls /gm)?.length, 1);
+  for (const service of ['app', 'logto', 's3', 'mailpit', 'uptrace']) {
+    assert.match(caddy, new RegExp(`handle @${service} \\{`));
+  }
   const vite = await read('./vite.preview.mjs');
   assert.match(vite, /build: \{\n\s+sourcemap: false/);
+});
+
+test('bootstrap obtains one SAN certificate for every public hostname', async () => {
+  const bootstrap = await read('./bootstrap.sh');
+  assert.match(bootstrap, /certbot certonly/);
+  assert.match(bootstrap, /--cert-name "\$certificate_name"/);
+  assert.match(bootstrap, /PREVIEW_CERTIFICATE=\$certificate_live_dir\/fullchain\.pem/);
+  assert.match(bootstrap, /PREVIEW_PRIVATE_KEY=\$certificate_live_dir\/privkey\.pem/);
+  assert.deepEqual(
+    [...bootstrap.matchAll(/--domain "([^"\n]+)"/g)].map((match) => match[1]),
+    ['$hostname', 'logto.$hostname', 's3.$hostname', 'mailpit.$hostname', 'uptrace.$hostname'],
+  );
 });
 
 test('bootstrap fails closed and replaces inherited shared credentials', async () => {

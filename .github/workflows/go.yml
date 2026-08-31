@@ -28,6 +28,9 @@ jobs:
     - name: Test
       run: go test -v ./...
 
+    - name: Test Preview
+      run: node --test preview/*.test.mjs preview/remote/*.test.mjs
+
     - name: Build
       run: make cross-compile
 

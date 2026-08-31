@@ -29,6 +29,7 @@ import {
   assertSetupResourceOwned,
   ownedDnsRecords,
   parseCliArgs,
+  shouldForwardSshAgent,
   terminatePreview,
 } from './preview.mjs';
 
@@ -301,28 +302,33 @@ test('setup refuses to adopt untagged IAM resources', () => {
   }, 'IAM role preview'));
 });
 
-test('SSH uses SSM, Instance Connect target, and agent forwarding', () => {
+test('SSH uses SSM and disables agent forwarding by default', () => {
   const args = buildSshArgs(
     { profile: 'preview', region: 'us-west-2', sshUser: 'ubuntu' },
     { InstanceId: 'i-123' },
     '/tmp/key',
   );
-  assert.equal(args[0], '-A');
+  assert.equal(args[0], '-a');
   assert.ok(args.some((value) => value.includes('ssm start-session')));
   assert.ok(args.includes('ubuntu@i-123'));
   assert.ok(args.includes('/tmp/key'));
 });
 
-test('SSH can explicitly disable agent forwarding', () => {
+test('SSH can explicitly enable agent forwarding', () => {
   const args = buildSshArgs(
     { profile: 'preview', region: 'us-west-2', sshUser: 'ubuntu' },
     { InstanceId: 'i-123' },
     '/tmp/key',
     [],
-    { forwardAgent: false },
+    { forwardAgent: true },
   );
-  assert.equal(args[0], '-a');
-  assert.equal(args.includes('-A'), false);
+  assert.equal(args[0], '-A');
+});
+
+test('only interactive connect can forward the SSH agent', () => {
+  assert.equal(shouldForwardSshAgent('connect'), true);
+  assert.equal(shouldForwardSshAgent('connect', { noAgentForwarding: true }), false);
+  assert.equal(shouldForwardSshAgent('extend'), false);
 });
 
 test('selects one agent public key so SSH can constrain offered identities', () => {

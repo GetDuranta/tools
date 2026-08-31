@@ -1,30 +1,43 @@
-{$PREVIEW_HOSTNAME} {
-	encode zstd gzip
-	reverse_proxy https://127.0.0.1:18443 {
-		transport http {
-			tls_insecure_skip_verify
+{$PREVIEW_HOSTNAME},
+logto.{$PREVIEW_HOSTNAME},
+s3.{$PREVIEW_HOSTNAME},
+mailpit.{$PREVIEW_HOSTNAME},
+uptrace.{$PREVIEW_HOSTNAME} {
+	tls {$PREVIEW_CERTIFICATE} {$PREVIEW_PRIVATE_KEY}
+
+	@app host {$PREVIEW_HOSTNAME}
+	handle @app {
+		encode zstd gzip
+		reverse_proxy https://127.0.0.1:18443 {
+			transport http {
+				tls_insecure_skip_verify
+			}
 		}
 	}
-}
 
-logto.{$PREVIEW_HOSTNAME} {
-	reverse_proxy http://127.0.0.1:13001
-}
-
-s3.{$PREVIEW_HOSTNAME} {
-	reverse_proxy http://127.0.0.1:19000
-}
-
-mailpit.{$PREVIEW_HOSTNAME} {
-	basicauth {
-		preview {$DIAGNOSTICS_PASSWORD_HASH}
+	@logto host logto.{$PREVIEW_HOSTNAME}
+	handle @logto {
+		reverse_proxy http://127.0.0.1:13001
 	}
-	reverse_proxy http://127.0.0.1:18025
-}
 
-uptrace.{$PREVIEW_HOSTNAME} {
-	basicauth {
-		preview {$DIAGNOSTICS_PASSWORD_HASH}
+	@s3 host s3.{$PREVIEW_HOSTNAME}
+	handle @s3 {
+		reverse_proxy http://127.0.0.1:19000
 	}
-	reverse_proxy http://127.0.0.1:13443
+
+	@mailpit host mailpit.{$PREVIEW_HOSTNAME}
+	handle @mailpit {
+		basicauth {
+			preview {$DIAGNOSTICS_PASSWORD_HASH}
+		}
+		reverse_proxy http://127.0.0.1:18025
+	}
+
+	@uptrace host uptrace.{$PREVIEW_HOSTNAME}
+	handle @uptrace {
+		basicauth {
+			preview {$DIAGNOSTICS_PASSWORD_HASH}
+		}
+		reverse_proxy http://127.0.0.1:13443
+	}
 }
