@@ -14,6 +14,7 @@ import {
   CliError,
   assertManagedResource,
   assertPreviewAccount,
+  buildAuditTags,
   buildBootstrapUserData,
   buildDnsChanges,
   buildHostname,
@@ -33,6 +34,7 @@ import {
   publicKeyFromIdentity,
   tagsFromAws,
   validateGoldenAmi,
+  workspaceResourceIds,
 } from './lib.mjs';
 
 const HELP = `Duranta Preview EC2 environments
@@ -137,10 +139,7 @@ function callerIdentity(aws) {
 
 function inferOwner(identity, explicit) {
   if (explicit) return normalizeOwner(explicit);
-  const session = String(identity.Arn ?? '').split('/').at(-1)
-    || String(identity.UserId ?? '').split(':').at(-1);
-  if (!session) throw new CliError('Could not infer owner from AWS SSO; pass --owner <name>');
-  return normalizeOwner(decodeURIComponent(session));
+  return normalizeOwner(buildAuditTags(identity).CreatedBy);
 }
 
 function resolveGoldenAmi(aws, accountId) {
@@ -215,8 +214,16 @@ async function createPreview(aws, issue, options) {
   }
 
   const image = resolveGoldenAmi(aws, identity.Account);
-  const expiration = expiresAt(ttl);
-  const tags = buildTags({ creatorId, issue, owner, hostname, expiration });
+  const createdAt = new Date();
+  const expiration = expiresAt(ttl, createdAt);
+  const auditTags = buildAuditTags(identity, createdAt);
+  const tags = buildTags({
+    auditTags,
+    issue,
+    owner,
+    hostname,
+    expiration,
+  });
   const userData = buildBootstrapUserData({ hostname, expiration });
   const launch = aws.run(buildRunInstancesArgs({
     amiId: image.ImageId,
@@ -337,7 +344,7 @@ function extendPreview(aws, name, duration, options) {
   ], { capture: true });
   aws.run([
     'ec2', 'create-tags',
-    '--resources', instance.InstanceId,
+    '--resources', ...workspaceResourceIds(instance),
     '--tags', JSON.stringify([{ Key: 'ExpiresAt', Value: expiration }]),
   ]);
   console.log(`Expires: ${expiration}`);

@@ -63,9 +63,11 @@ sudo cat /var/lib/duranta-preview/diagnostics-credentials
 - EC2 stop is disabled; expiration performs an OS shutdown configured to terminate
 - Bootstrap starts with a safety deadline of at most one hour and installs the requested deadline after the stack is healthy
 - Expiration may leave two stale DNS records; a later create replaces them, while explicit terminate deletes the exact records best-effort
+- Every taggable per-run resource carries `CreatorId`, human-readable `CreatedBy`, ISO `CreatedAt`, `ManagedBy`, and `Purpose`; workspace disks and ENIs also carry the hostname and expiry
 - CVML is not included in this CPU-only version
 
 There is no stop, resume, snapshot, or persistent development state. Push work before termination.
+Route53 record sets and automatically assigned public IPv4 addresses do not support tags; shared subnet, security group, IAM, hosted zone, and SSM pointer resources are not recreated per workspace.
 
 ## Golden AMI
 

@@ -68,11 +68,12 @@ export function extendExpiration(current, duration, now = new Date()) {
   return new Date(base + parseDuration(duration) * 1000).toISOString();
 }
 
-export function buildTags({ creatorId, issue, owner, hostname, expiration }) {
+export function buildTags({ auditTags, issue, owner, hostname, expiration }) {
   return {
     Name: hostname,
     ManagedBy: CONFIG.managedBy,
-    CreatorId: creatorId,
+    Purpose: 'workspace',
+    ...auditTags,
     Issue: normalizeDnsLabel(issue, 'issue'),
     Owner: normalizeOwner(owner),
     Hostname: hostname,
@@ -104,6 +105,22 @@ export function creatorIdFromIdentity(identity) {
   const creatorId = String(identity?.UserId ?? '').trim();
   if (!creatorId) throw new CliError('AWS caller identity has no usable UserId');
   return creatorId;
+}
+
+export function buildAuditTags(identity, createdAt = new Date()) {
+  const creatorId = creatorIdFromIdentity(identity);
+  const arnSession = String(identity?.Arn ?? '').split('/').at(-1)?.trim();
+  const separator = creatorId.indexOf(':');
+  const userIdSession = separator === -1 ? creatorId : creatorId.slice(separator + 1);
+  const encodedCreatedBy = arnSession || userIdSession;
+  let createdBy = encodedCreatedBy;
+  try {
+    createdBy = decodeURIComponent(encodedCreatedBy);
+  } catch {}
+
+  const date = createdAt instanceof Date ? createdAt : new Date(createdAt);
+  if (!Number.isFinite(date.getTime())) throw new CliError(`Invalid creation time: ${createdAt}`);
+  return { CreatorId: creatorId, CreatedBy: createdBy, CreatedAt: date.toISOString() };
 }
 
 export function assertPreviewAccount(identity) {
@@ -168,14 +185,7 @@ export function validateGoldenAmi(image, accountId) {
 }
 
 export function buildRunInstancesArgs({ amiId, clientToken, rootDeviceName, tags, userData }) {
-  const volumeTags = tagsToAws({
-    Name: `${tags.Name}-root`,
-    ManagedBy: tags.ManagedBy,
-    CreatorId: tags.CreatorId,
-    Issue: tags.Issue,
-    Owner: tags.Owner,
-    Hostname: tags.Hostname,
-  });
+  const resourceTags = (name) => tagsToAws({ ...tags, Name: name });
   return [
     'ec2', 'run-instances',
     '--image-id', amiId,
@@ -208,11 +218,20 @@ export function buildRunInstancesArgs({ amiId, clientToken, rootDeviceName, tags
     '--instance-initiated-shutdown-behavior', 'terminate',
     '--disable-api-stop',
     '--tag-specifications', JSON.stringify([
-      { ResourceType: 'instance', Tags: tagsToAws(tags) },
-      { ResourceType: 'volume', Tags: volumeTags },
+      { ResourceType: 'instance', Tags: resourceTags(tags.Name) },
+      { ResourceType: 'volume', Tags: resourceTags(`${tags.Name}-root`) },
+      { ResourceType: 'network-interface', Tags: resourceTags(`${tags.Name}-primary`) },
     ]),
     '--user-data', userData,
   ];
+}
+
+export function workspaceResourceIds(instance) {
+  return [
+    instance.InstanceId,
+    ...(instance.BlockDeviceMappings ?? []).map(({ Ebs }) => Ebs?.VolumeId),
+    ...(instance.NetworkInterfaces ?? []).map(({ NetworkInterfaceId }) => NetworkInterfaceId),
+  ].filter(Boolean);
 }
 
 export function buildBootstrapUserData({ hostname, expiration }) {

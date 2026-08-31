@@ -4,6 +4,7 @@ import test from 'node:test';
 import { CONFIG } from './config.mjs';
 import {
   assertPreviewAccount,
+  buildAuditTags,
   buildAwsArgs,
   buildBootstrapUserData,
   buildDnsChanges,
@@ -19,6 +20,7 @@ import {
   parseDuration,
   tagsToAws,
   validateGoldenAmi,
+  workspaceResourceIds,
 } from './lib.mjs';
 import { parseCliArgs, shouldForwardSshAgent, terminatePreview } from './preview.mjs';
 
@@ -30,8 +32,10 @@ const identity = {
 
 const hostname = `dur-5542.vitalii.${CONFIG.domain}`;
 const expiration = '2026-09-03T00:00:00.000Z';
+const createdAt = '2026-09-01T00:00:00.000Z';
+const auditTags = buildAuditTags(identity, createdAt);
 const tags = buildTags({
-  creatorId: identity.UserId,
+  auditTags,
   issue: 'DUR-5542',
   owner: 'vitalii',
   hostname,
@@ -69,7 +73,10 @@ test('tags resources and counts the exact AWS creator only', () => {
   assert.deepEqual(tags, {
     Name: hostname,
     ManagedBy: CONFIG.managedBy,
+    Purpose: 'workspace',
     CreatorId: identity.UserId,
+    CreatedBy: 'vitalii@getduranta.com',
+    CreatedAt: createdAt,
     Issue: 'dur-5542',
     Owner: 'vitalii',
     Hostname: hostname,
@@ -129,6 +136,23 @@ test('launches one disposable public instance with IMDSv2 and stop protection', 
   const block = JSON.parse(args[args.indexOf('--block-device-mappings') + 1]);
   assert.equal(block[0].Ebs.DeleteOnTermination, true);
   assert.equal(block[0].Ebs.VolumeSize, CONFIG.volumeSize);
+  const tagSpecifications = JSON.parse(args[args.indexOf('--tag-specifications') + 1]);
+  assert.deepEqual(tagSpecifications.map(({ ResourceType }) => ResourceType), [
+    'instance', 'volume', 'network-interface',
+  ]);
+  for (const specification of tagSpecifications) {
+    const resourceTags = Object.fromEntries(specification.Tags.map(({ Key, Value }) => [Key, Value]));
+    assert.equal(resourceTags.CreatedBy, 'vitalii@getduranta.com');
+    assert.equal(resourceTags.CreatedAt, createdAt);
+    assert.equal(resourceTags.CreatorId, identity.UserId);
+    assert.equal(resourceTags.Purpose, 'workspace');
+    assert.equal(resourceTags.ExpiresAt, expiration);
+  }
+  assert.deepEqual(workspaceResourceIds({
+    InstanceId: 'i-123',
+    BlockDeviceMappings: [{ Ebs: { VolumeId: 'vol-123' } }],
+    NetworkInterfaces: [{ NetworkInterfaceId: 'eni-123' }],
+  }), ['i-123', 'vol-123', 'eni-123']);
 });
 
 test('bootstrap receives only hostname and expiry and terminates on failure', () => {

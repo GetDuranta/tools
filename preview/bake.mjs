@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import { CONFIG } from './config.mjs';
+import { buildAuditTags, tagsToAws } from './lib.mjs';
 
 const execFileAsync = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -204,12 +205,13 @@ export function buildAmiName(date, shortSha) {
   return `duranta-preview-main-${stamp}-${shortSha.slice(0, 8).toLowerCase()}`;
 }
 
-export function buildBuilderArgs(baseAmi, rootDeviceName, clientToken) {
-  const tags = [
-    { Key: 'Name', Value: 'duranta-preview-ami-builder' },
-    { Key: 'ManagedBy', Value: CONFIG.managedBy },
-    { Key: 'Purpose', Value: 'ami-builder' },
-  ];
+export function buildBuilderArgs(baseAmi, rootDeviceName, clientToken, auditTags) {
+  const tags = tagsToAws({
+    Name: 'duranta-preview-ami-builder',
+    ManagedBy: CONFIG.managedBy,
+    Purpose: 'ami-builder',
+    ...auditTags,
+  });
   return [
     'ec2', 'run-instances',
     '--image-id', baseAmi,
@@ -248,6 +250,27 @@ export function buildBuilderArgs(baseAmi, rootDeviceName, clientToken) {
     '--tag-specifications', JSON.stringify([
       { ResourceType: 'instance', Tags: tags },
       { ResourceType: 'volume', Tags: tags },
+      { ResourceType: 'network-interface', Tags: tags },
+    ]),
+  ];
+}
+
+export function buildCreateImageArgs(instanceId, name, shortSha, auditTags) {
+  const tags = tagsToAws({
+    Name: name,
+    ManagedBy: CONFIG.managedBy,
+    Purpose: 'golden',
+    SourceCommit: shortSha,
+    ...auditTags,
+  });
+  return [
+    'ec2', 'create-image',
+    '--instance-id', instanceId,
+    '--name', name,
+    '--description', `Duranta Preview golden AMI from main ${shortSha}`,
+    '--tag-specifications', JSON.stringify([
+      { ResourceType: 'image', Tags: tags },
+      { ResourceType: 'snapshot', Tags: tags },
     ]),
   ];
 }
@@ -384,7 +407,7 @@ async function terminateBuilder(instanceId) {
 
 async function bake(identity) {
   await validateLocalTools();
-  assertExpectedAccount(await aws(['sts', 'get-caller-identity']));
+  const caller = assertExpectedAccount(await aws(['sts', 'get-caller-identity']));
   const { baseAmi, rootDeviceName } = await resolveBaseAmi();
   const key = await publicKey(identity);
   const temporary = await mkdtemp(join(tmpdir(), 'duranta-preview-bake-'));
@@ -399,7 +422,12 @@ async function bake(identity) {
   let imageId = null;
   let published = false;
   try {
-    const launch = await aws(buildBuilderArgs(baseAmi, rootDeviceName, randomUUID()), { timeout: 180_000 });
+    const launch = await aws(buildBuilderArgs(
+      baseAmi,
+      rootDeviceName,
+      randomUUID(),
+      buildAuditTags(caller),
+    ), { timeout: 180_000 });
     instanceId = launch.Instances?.[0]?.InstanceId;
     if (!instanceId) throw new Error('run-instances did not return an instance ID');
 
@@ -428,22 +456,12 @@ async function bake(identity) {
       true,
     );
     const name = buildAmiName(new Date(), shortSha);
-    const imageTags = [
-      { Key: 'Name', Value: name },
-      { Key: 'ManagedBy', Value: CONFIG.managedBy },
-      { Key: 'Purpose', Value: 'golden' },
-      { Key: 'SourceCommit', Value: shortSha },
-    ];
-    const created = await aws([
-      'ec2', 'create-image',
-      '--instance-id', instanceId,
-      '--name', name,
-      '--description', `Duranta Preview golden AMI from main ${shortSha}`,
-      '--tag-specifications', JSON.stringify([
-        { ResourceType: 'image', Tags: imageTags },
-        { ResourceType: 'snapshot', Tags: imageTags },
-      ]),
-    ]);
+    const created = await aws(buildCreateImageArgs(
+      instanceId,
+      name,
+      shortSha,
+      buildAuditTags(caller),
+    ));
     imageId = created.ImageId;
     if (!imageId) throw new Error('create-image did not return an AMI ID');
 
