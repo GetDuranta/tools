@@ -42,8 +42,9 @@ test('rejects base AMIs and retention candidates from another architecture', () 
   ];
   assert.deepEqual(
     managedImagesForArchitecture([
-      { ImageId: 'ami-arm', Architecture: 'arm64', Tags: managedTags },
-      { ImageId: 'ami-x86', Architecture: 'x86_64', Tags: managedTags },
+      { ImageId: 'ami-arm', State: 'available', Architecture: 'arm64', Tags: managedTags },
+      { ImageId: 'ami-pending', State: 'pending', Architecture: 'arm64', Tags: managedTags },
+      { ImageId: 'ami-x86', State: 'available', Architecture: 'x86_64', Tags: managedTags },
     ]).map(({ ImageId }) => ImageId),
     ['ami-arm'],
   );
@@ -129,7 +130,9 @@ test('AMI retention protects the published image and deletes only an unpublished
     aws: async (args) => {
       calls.push(args);
       if (args[0] === 'ssm') return { Parameter: { Value: 'ami-published' } };
-      if (args[1] === 'describe-images') return { Images: [{ ImageId: 'ami-created' }] };
+      if (args[1] === 'describe-images') {
+        return { Images: [{ ImageId: 'ami-created', State: 'available' }] };
+      }
       return {};
     },
     warn: () => {},

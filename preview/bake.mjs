@@ -89,7 +89,7 @@ export async function waitForImageAvailable(imageId, options = {}) {
     setTimeout(resolvePromise, delayMs);
   }));
   const intervalMs = options.intervalMs ?? 15_000;
-  const maxAttempts = options.maxAttempts ?? 240;
+  const maxAttempts = options.maxAttempts ?? 480;
   let lastState = 'unknown';
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -176,7 +176,8 @@ async function listManagedImages(awsClient = aws) {
 export function managedImagesForArchitecture(images) {
   return images.filter((image) => {
     const tags = tagsFromAws(image.Tags);
-    return image.Architecture === CONFIG.architecture
+    return image.State === 'available'
+      && image.Architecture === CONFIG.architecture
       && tags.ManagedBy === CONFIG.managedBy
       && tags.Purpose === 'golden';
   });
@@ -512,6 +513,7 @@ async function bake(identity) {
     ));
     imageId = created.ImageId;
     if (!imageId) throw new Error('create-image did not return an AMI ID');
+    console.log(`Created ${name} (${imageId}); waiting for AWS to publish it...`);
 
     await waitForImageAvailable(imageId);
     await aws([
