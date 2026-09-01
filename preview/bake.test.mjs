@@ -217,3 +217,47 @@ test('golden warm-up removes stateful service volumes', () => {
   assert.match(provision, /duranta-preview_clickhouse_data/);
   assert.match(provision, /duranta-preview_blob_data/);
 });
+
+test('golden bake includes and validates the CPU CVML runtime', () => {
+  const bootstrap = readFileSync(new URL('./remote/bootstrap.sh', import.meta.url), 'utf8');
+  const buildImages = readFileSync(new URL('./remote/build-images.sh', import.meta.url), 'utf8');
+  const compose = readFileSync(new URL('./remote/compose.preview.yml', import.meta.url), 'utf8');
+  const containerfile = readFileSync(new URL('./remote/cvml.cpu.dockerfile', import.meta.url), 'utf8');
+  const caddy = readFileSync(new URL('./remote/Caddyfile', import.meta.url), 'utf8');
+  const provision = readFileSync(new URL('./remote/provision.sh', import.meta.url), 'utf8');
+  const stack = readFileSync(new URL('./remote/stack.sh', import.meta.url), 'utf8');
+
+  assert.match(buildImages, /cp cvml\/pyproject\.toml cvml\/uv\.lock/);
+  assert.match(buildImages, /localhost\/duranta-preview\/cvml:golden/);
+  assert.match(buildImages, /com\.duranta\.preview\.cvml-inputs/);
+  assert.match(buildImages, /cvml-fingerprint/);
+  assert.match(buildImages, /\.Architecture.*arm64/);
+  assert.doesNotMatch(containerfile, /model_artifacts|COPY \. \/src/);
+  assert.match(containerfile, /uv sync --frozen --no-dev --no-install-package duranta-proto/);
+  assert.match(containerfile, /UV_PYTHON=3\.12\.12/);
+
+  assert.match(compose, /cvml:\n    image: localhost\/duranta-preview\/cvml:golden/);
+  assert.match(compose, /WORKERS: "1"/);
+  assert.match(compose, /cpus: 6/);
+  assert.match(compose, /mem_limit: 22g/);
+  assert.match(compose, /cvml-models\.cpu\.yaml:\/src\/cvml\/algorithm\/models\.yaml:ro,z/);
+  assert.match(compose, /start_period: 20m/);
+
+  assert.match(bootstrap, /HttpEndpoint: http:\/\/cvml:8082/);
+  assert.match(bootstrap, /prepare-cvml-models\.mjs/);
+  assert.match(bootstrap, /printf 'ready\\n'.*state_dir\/ready/);
+  assert.match(caddy, /path \/__preview\/ready/);
+  assert.match(stack, /deadline=\$\(\(SECONDS \+ 1200\)\)/);
+  assert.match(stack, /http:\/\/127\.0\.0\.1:18082\/ping/);
+  assert.match(stack, /HEAD:cvml HEAD:proto\/python/);
+  assert.match(stack, /duranta-preview-build-images cvml-fingerprint/);
+  assert.match(stack, /duranta-preview-build-images cvml/);
+  assert.match(stack, /stop cvml/);
+  assert.match(stack, /rebuild\)[\s\S]*stop cvml[\s\S]*duranta-preview-build-images/);
+  assert.match(stack, /ensure-cvml\)/);
+  assert.match(stack, /CVML model artifact is still an LFS pointer/);
+  assert.match(provision, /run_as_preview git -C \/opt\/duranta-preview\/app lfs fsck/);
+  assert.match(provision, /caddy validate --config \/etc\/caddy\/Caddyfile/);
+  assert.match(provision, /duranta-preview-stack logs db cvml/);
+  assert.match(provision, /podman image inspect localhost\/duranta-preview\/cvml:golden/);
+});

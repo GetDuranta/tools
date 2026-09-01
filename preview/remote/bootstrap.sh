@@ -31,6 +31,7 @@ certificate_work_dir=$certificate_root/work
 certificate_logs_dir=$certificate_root/logs
 certificate_live_dir=$certificate_config_dir/live/$certificate_name
 install -d -m 0755 "$runtime_dir" "$state_dir"
+rm -f "$state_dir/ready"
 if [[ "$prepare_only" == false ]]; then
   safety_deadline_epoch=$((now_epoch + 3600))
   if ((deadline_epoch < safety_deadline_epoch)); then
@@ -100,7 +101,7 @@ Data:
   SessionRecCH: ''
 Services:
   Cvml:
-    HttpEndpoint: http://127.0.0.1:1
+    HttpEndpoint: http://cvml:8082
   Sendgrid:
     Enabled: false
     ApiKey: ''
@@ -108,6 +109,11 @@ Repos:
   Cvml:
     BlobBucket: duranta-cvml-preview
 EOF
+
+node /usr/local/lib/duranta-preview/prepare-cvml-models.mjs \
+  "$app_dir/cvml/algorithm/models.yaml" \
+  "$runtime_dir/cvml-models.cpu.yaml"
+: >"$runtime_dir/cvml-fingerprint"
 
 cat >"$app_dir/.env.local" <<EOF
 BACKEND_EXTRA_ARGS=--configs=local,with-logto,preview
@@ -141,12 +147,18 @@ EOF
 chmod 0600 "$runtime_dir/caddy.env"
 chown ubuntu:ubuntu \
   "$runtime_dir/compose.env" \
+  "$runtime_dir/cvml-fingerprint" \
+  "$runtime_dir/cvml-models.cpu.yaml" \
   "$runtime_dir/preview.yaml" \
   "$runtime_dir/uptrace.yml" \
   "$runtime_dir/vite.preview.mjs" \
   "$app_dir/.env.local" \
   "$app_dir/frontend/website/.env.live.local"
-chmod 0600 "$runtime_dir/compose.env" "$runtime_dir/preview.yaml"
+chmod 0600 \
+  "$runtime_dir/compose.env" \
+  "$runtime_dir/cvml-fingerprint" \
+  "$runtime_dir/cvml-models.cpu.yaml" \
+  "$runtime_dir/preview.yaml"
 
 if [[ "$prepare_only" == true ]]; then
   exit 0
@@ -196,6 +208,8 @@ systemctl reload-or-restart caddy
 systemctl enable duranta-preview-stack.service
 systemctl restart duranta-preview-stack.service
 /usr/local/bin/duranta-preview-expiry set "$expires_at"
+printf 'ready\n' >"$state_dir/ready"
+chmod 0644 "$state_dir/ready"
 
 echo "Preview: https://$hostname/a/"
 echo "Diagnostics credentials: sudo cat $state_dir/diagnostics-credentials"

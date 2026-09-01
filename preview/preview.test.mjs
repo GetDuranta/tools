@@ -4,6 +4,7 @@ import test from 'node:test';
 import { CONFIG } from './config.mjs';
 import {
   assertPreviewAccount,
+  assertVolumeInitializationRateSupport,
   buildAuditTags,
   buildBootstrapUserData,
   buildCreditSpecificationArgs,
@@ -19,7 +20,7 @@ import {
   validateGoldenAmi,
   workspaceResourceIds,
 } from './lib.mjs';
-import { terminatePreview } from './preview.mjs';
+import { terminatePreview, waitForPreview } from './preview.mjs';
 
 const identity = {
   Account: CONFIG.accountId,
@@ -55,6 +56,7 @@ test('pins the ARM64 T4g infrastructure contract', () => {
     baseAmiParameter: CONFIG.baseAmiParameter,
     builderInstanceType: CONFIG.builderInstanceType,
     goldenAmiParameter: CONFIG.goldenAmiParameter,
+    volumeInitializationRate: CONFIG.volumeInitializationRate,
     volumeSize: CONFIG.volumeSize,
     workspaceInstanceType: CONFIG.workspaceInstanceType,
   }, {
@@ -62,6 +64,7 @@ test('pins the ARM64 T4g infrastructure contract', () => {
     baseAmiParameter: '/aws/service/canonical/ubuntu/server/26.04/stable/current/arm64/hvm/ebs-gp3/ami-id',
     builderInstanceType: 't4g.2xlarge',
     goldenAmiParameter: '/duranta-preview/golden-ami-id-arm64',
+    volumeInitializationRate: 300,
     volumeSize: 100,
     workspaceInstanceType: 't4g.2xlarge',
   });
@@ -70,6 +73,46 @@ test('pins the ARM64 T4g infrastructure contract', () => {
     ['--credit-specification', 'CpuCredits=unlimited'],
   );
   assert.deepEqual(buildCreditSpecificationArgs('m7i.4xlarge'), []);
+});
+
+test('requires an AWS CLI model that supports provisioned volume initialization', () => {
+  const supported = {
+    BlockDeviceMappings: [{ Ebs: { VolumeInitializationRate: 0 } }],
+  };
+  assert.equal(assertVolumeInitializationRateSupport(supported), supported);
+  assert.throws(
+    () => assertVolumeInitializationRateSupport({ BlockDeviceMappings: [{ Ebs: {} }] }),
+    /update AWS CLI v2/,
+  );
+});
+
+test('waits for the exact marker and then verifies the public app', async () => {
+  let now = 0;
+  const responses = [
+    new Response('<html>SPA fallback</html>', { status: 200 }),
+    new Response('ready\n', { status: 200 }),
+    new Response('temporarily unavailable', { status: 502 }),
+    new Response('ready\n', { status: 200 }),
+    new Response('<html>app</html>', { status: 200 }),
+  ];
+  const urls = [];
+
+  await waitForPreview(hostname, 30000, {
+    fetchImpl: async (url) => {
+      urls.push(url);
+      return responses.shift();
+    },
+    now: () => now,
+    sleep: async (delayMs) => { now += delayMs; },
+  });
+
+  assert.deepEqual(urls, [
+    `https://${hostname}/__preview/ready`,
+    `https://${hostname}/__preview/ready`,
+    `https://${hostname}/a/`,
+    `https://${hostname}/__preview/ready`,
+    `https://${hostname}/a/`,
+  ]);
 });
 
 test('account and creator identity scope mutations and limits', () => {
@@ -127,6 +170,7 @@ test('launches a tagged disposable workspace', () => {
   assert.equal(network.AssociatePublicIpAddress, true);
   assert.equal(network.DeleteOnTermination, true);
   assert.equal(storage.DeleteOnTermination, true);
+  assert.equal(storage.VolumeInitializationRate, 300);
   assert.equal(storage.VolumeSize, 100);
 
   const specifications = JSON.parse(args[args.indexOf('--tag-specifications') + 1]);

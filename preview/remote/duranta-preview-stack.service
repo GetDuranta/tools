@@ -6,7 +6,7 @@ Wants=network-online.target user@1000.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-TimeoutStartSec=20min
+TimeoutStartSec=30min
 User=ubuntu
 Group=ubuntu
 Environment=HOME=/home/ubuntu

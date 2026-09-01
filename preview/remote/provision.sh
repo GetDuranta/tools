@@ -72,6 +72,7 @@ if [[ ! -d /opt/duranta-preview/app/.git ]]; then
     git clone --branch main git@github.com:GetDuranta/app.git /opt/duranta-preview/app
 fi
 sudo -u ubuntu env SSH_AUTH_SOCK="$SSH_AUTH_SOCK" git -C /opt/duranta-preview/app lfs pull
+run_as_preview git -C /opt/duranta-preview/app lfs fsck
 
 root_source="$(findmnt -n -o SOURCE --target /)"
 app_source="$(findmnt -n -o SOURCE --target /opt/duranta-preview/app)"
@@ -88,6 +89,8 @@ node /tmp/duranta-preview-remote/patch-logto.mjs \
 
 install -d -m 0755 /usr/local/lib/duranta-preview /etc/systemd/system/caddy.service.d
 install -m 0644 /tmp/duranta-preview-remote/compose.preview.yml /usr/local/lib/duranta-preview/
+install -m 0644 /tmp/duranta-preview-remote/cvml.cpu.dockerfile /usr/local/lib/duranta-preview/
+install -m 0644 /tmp/duranta-preview-remote/prepare-cvml-models.mjs /usr/local/lib/duranta-preview/
 install -m 0644 /tmp/duranta-preview-remote/vite.preview.mjs /usr/local/lib/duranta-preview/
 install -m 0644 /tmp/duranta-preview-remote/Caddyfile /etc/caddy/Caddyfile
 install -m 0644 /tmp/duranta-preview-remote/caddy.service.d.conf /etc/systemd/system/caddy.service.d/preview.conf
@@ -102,6 +105,20 @@ systemctl daemon-reload
 systemctl disable --now caddy duranta-preview-stack.service || true
 systemctl stop duranta-preview-expiry.timer || true
 systemctl enable duranta-preview-expiry.timer
+
+openssl req -x509 -nodes -newkey rsa:2048 \
+  -keyout "$temporary/caddy.key" \
+  -out "$temporary/caddy.crt" \
+  -days 1 \
+  -subj /CN=warm.invalid \
+  >/dev/null 2>&1
+validation_password_hash="$(caddy hash-password --plaintext validation-only)"
+env \
+  PREVIEW_HOSTNAME=warm.invalid \
+  DIAGNOSTICS_PASSWORD_HASH="$validation_password_hash" \
+  PREVIEW_CERTIFICATE="$temporary/caddy.crt" \
+  PREVIEW_PRIVATE_KEY="$temporary/caddy.key" \
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
 for image in \
   docker.io/library/redis:7-alpine \
@@ -122,10 +139,11 @@ run_as_preview /usr/local/bin/duranta-preview-build-images
   --prepare-only
 if ! run_as_preview /usr/local/bin/duranta-preview-stack up; then
   run_as_preview /usr/local/bin/duranta-preview-stack status >&2 || true
-  run_as_preview /usr/local/bin/duranta-preview-stack logs db >&2 || true
+  run_as_preview /usr/local/bin/duranta-preview-stack logs db cvml >&2 || true
   exit 1
 fi
 run_as_preview /usr/local/bin/duranta-preview-stack down
+test "$(run_as_preview podman image inspect localhost/duranta-preview/cvml:golden --format '{{.Architecture}}')" = arm64
 run_as_preview podman volume rm \
   duranta-preview_db_data \
   duranta-preview_clickhouse_data \

@@ -150,6 +150,14 @@ export function buildCreditSpecificationArgs(instanceType) {
     : [];
 }
 
+export function assertVolumeInitializationRateSupport(skeleton) {
+  const ebs = skeleton?.BlockDeviceMappings?.[0]?.Ebs;
+  if (!ebs || !Object.hasOwn(ebs, 'VolumeInitializationRate')) {
+    throw new CliError('This Preview CLI requires an AWS CLI v2 EC2 model with VolumeInitializationRate support; update AWS CLI v2');
+  }
+  return skeleton;
+}
+
 function commandError(args, result) {
   const detail = String(result.stderr || result.stdout || '').trim();
   return new CliError(`aws ${args.join(' ')} failed${detail ? `\n${detail}` : ''}`);
@@ -219,6 +227,7 @@ export function buildRunInstancesArgs({ amiId, clientToken, rootDeviceName, tags
       Ebs: {
         DeleteOnTermination: true,
         Encrypted: true,
+        VolumeInitializationRate: CONFIG.volumeInitializationRate,
         VolumeSize: CONFIG.volumeSize,
         VolumeType: 'gp3',
       },

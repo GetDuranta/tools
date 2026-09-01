@@ -5,6 +5,16 @@ mailpit.{$PREVIEW_HOSTNAME},
 uptrace.{$PREVIEW_HOSTNAME} {
 	tls {$PREVIEW_CERTIFICATE} {$PREVIEW_PRIVATE_KEY}
 
+	@preview_ready {
+		host {$PREVIEW_HOSTNAME}
+		path /__preview/ready
+	}
+	handle @preview_ready {
+		root * /var/lib/duranta-preview
+		rewrite * /ready
+		file_server
+	}
+
 	@app host {$PREVIEW_HOSTNAME}
 	handle @app {
 		encode zstd gzip

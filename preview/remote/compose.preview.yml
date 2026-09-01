@@ -48,6 +48,40 @@ services:
       retries: 40
     networks: [duranta]
 
+  cvml:
+    image: localhost/duranta-preview/cvml:golden
+    pull_policy: never
+    restart: unless-stopped
+    working_dir: /src/cvml
+    command: [/app/cvml/.venv/bin/python, /src/cvml/start_wsgi_server.py]
+    environment:
+      PYTHONPATH: /src/cvml:/src/proto/python
+      SERVER_CONFIG: /src/cvml/config/server.yaml
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel_collector:4317
+      NO_ALBUMENTATIONS_UPDATE: "1"
+      WORKERS: "1"
+      OMP_NUM_THREADS: "6"
+      MKL_NUM_THREADS: "6"
+      OPENBLAS_NUM_THREADS: "6"
+      NUMEXPR_NUM_THREADS: "6"
+    cpus: 6
+    mem_limit: 22g
+    memswap_limit: 22g
+    stop_grace_period: 30s
+    volumes:
+      - ${DURANTA_APP_DIR}/cvml:/src/cvml:ro,z
+      - ${DURANTA_APP_DIR}/proto/python:/src/proto/python:ro,z
+      - ${DURANTA_RUNTIME_DIR}/cvml-models.cpu.yaml:/src/cvml/algorithm/models.yaml:ro,z
+    ports:
+      - 127.0.0.1:18082:8082
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS --max-time 2 http://127.0.0.1:8082/ping"]
+      start_period: 20m
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks: [duranta]
+
   frontend:
     image: localhost/duranta-preview/frontend:golden
     environment:

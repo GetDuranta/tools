@@ -14,6 +14,7 @@ import {
   CliError,
   assertManagedResource,
   assertPreviewAccount,
+  assertVolumeInitializationRateSupport,
   buildAuditTags,
   buildBootstrapUserData,
   buildDnsChanges,
@@ -177,27 +178,42 @@ function terminateInstance(aws, instance, hostname) {
   aws.run(['ec2', 'wait', 'instance-terminated', '--instance-ids', instance.InstanceId], { timeout: 900000 });
 }
 
-async function waitForPreview(hostname, timeoutMs = 20 * 60 * 1000) {
-  const deadline = Date.now() + timeoutMs;
+export async function waitForPreview(hostname, timeoutMs = 45 * 60 * 1000, dependencies = {}) {
+  const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const sleep = dependencies.sleep ?? ((delayMs) => new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs)));
+  const now = dependencies.now ?? Date.now;
+  const deadline = now() + timeoutMs;
   let lastError = 'not attempted';
-  while (Date.now() < deadline) {
+  while (now() < deadline) {
     try {
-      const response = await fetch(`https://${hostname}/a/`, {
+      const marker = await fetchImpl(`https://${hostname}/__preview/ready`, {
         redirect: 'manual',
         signal: AbortSignal.timeout(10000),
       });
-      if (response.status >= 200 && response.status < 400) return;
-      lastError = `HTTP ${response.status}`;
+      const markerBody = await marker.text();
+      if (marker.status !== 200 || markerBody !== 'ready\n') {
+        lastError = `readiness marker returned HTTP ${marker.status} with an unexpected body`;
+      } else {
+        const app = await fetchImpl(`https://${hostname}/a/`, {
+          redirect: 'manual',
+          signal: AbortSignal.timeout(10000),
+        });
+        if (app.status === 200) return;
+        lastError = `public app returned HTTP ${app.status}`;
+      }
     } catch (error) {
       lastError = error.message;
     }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10000));
+    await sleep(10000);
   }
-  throw new CliError(`https://${hostname}/a/ was not ready after 20 minutes (${lastError})`);
+  throw new CliError(`Preview was not fully ready after ${Math.ceil(timeoutMs / 60000)} minutes (${lastError})`);
 }
 
 async function createPreview(aws, issue, options) {
   const identity = callerIdentity(aws);
+  assertVolumeInitializationRateSupport(aws.run([
+    'ec2', 'run-instances', '--generate-cli-skeleton', 'input',
+  ]));
   const creatorId = creatorIdFromIdentity(identity);
   const owner = inferOwner(identity, options.owner);
   const hostname = buildHostname(issue, owner);

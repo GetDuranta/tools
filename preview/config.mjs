@@ -11,6 +11,7 @@ export const CONFIG = Object.freeze({
   workspaceInstanceType: 't4g.2xlarge',
   builderInstanceType: 't4g.2xlarge',
   volumeSize: 100,
+  volumeInitializationRate: 300,
   sshUser: 'ubuntu',
   ttl: '48h',
   maxInstancesPerCreator: 10,
