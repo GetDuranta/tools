@@ -6,6 +6,7 @@ import {
   assertPreviewAccount,
   buildAuditTags,
   buildBootstrapUserData,
+  buildCreditSpecificationArgs,
   buildHostname,
   buildRunInstancesArgs,
   buildTags,
@@ -15,6 +16,7 @@ import {
   normalizeDnsLabel,
   parseDuration,
   tagsToAws,
+  validateGoldenAmi,
   workspaceResourceIds,
 } from './lib.mjs';
 import { terminatePreview } from './preview.mjs';
@@ -47,6 +49,29 @@ test('builds stable Preview names and deadlines', () => {
   assert.throws(() => parseDuration('48'), /Invalid duration/);
 });
 
+test('pins the ARM64 T4g infrastructure contract', () => {
+  assert.deepEqual({
+    architecture: CONFIG.architecture,
+    baseAmiParameter: CONFIG.baseAmiParameter,
+    builderInstanceType: CONFIG.builderInstanceType,
+    goldenAmiParameter: CONFIG.goldenAmiParameter,
+    volumeSize: CONFIG.volumeSize,
+    workspaceInstanceType: CONFIG.workspaceInstanceType,
+  }, {
+    architecture: 'arm64',
+    baseAmiParameter: '/aws/service/canonical/ubuntu/server/26.04/stable/current/arm64/hvm/ebs-gp3/ami-id',
+    builderInstanceType: 't4g.2xlarge',
+    goldenAmiParameter: '/duranta-preview/golden-ami-id-arm64',
+    volumeSize: 100,
+    workspaceInstanceType: 't4g.2xlarge',
+  });
+  assert.deepEqual(
+    buildCreditSpecificationArgs('t4g.2xlarge'),
+    ['--credit-specification', 'CpuCredits=unlimited'],
+  );
+  assert.deepEqual(buildCreditSpecificationArgs('m7i.4xlarge'), []);
+});
+
 test('account and creator identity scope mutations and limits', () => {
   assert.equal(assertPreviewAccount(identity), identity);
   assert.throws(
@@ -62,6 +87,22 @@ test('account and creator identity scope mutations and limits', () => {
   ], identity.UserId), 1);
 });
 
+test('accepts only golden AMIs for the configured architecture', () => {
+  const image = {
+    Architecture: CONFIG.architecture,
+    ImageId: 'ami-golden',
+    OwnerId: CONFIG.accountId,
+    RootDeviceName: '/dev/sda1',
+    State: 'available',
+    Tags: tagsToAws({ ManagedBy: CONFIG.managedBy, Purpose: 'golden' }),
+  };
+  assert.equal(validateGoldenAmi(image, CONFIG.accountId), image);
+  assert.throws(
+    () => validateGoldenAmi({ ...image, Architecture: 'x86_64' }, CONFIG.accountId),
+    /arm64 Preview golden AMI/,
+  );
+});
+
 test('launches a tagged disposable workspace', () => {
   const args = buildRunInstancesArgs({
     amiId: 'ami-123',
@@ -70,6 +111,14 @@ test('launches a tagged disposable workspace', () => {
     tags,
     userData: buildBootstrapUserData({ hostname, expiration }),
   });
+  assert.equal(
+    args[args.indexOf('--instance-type') + 1],
+    CONFIG.workspaceInstanceType,
+  );
+  assert.equal(
+    args[args.indexOf('--credit-specification') + 1],
+    'CpuCredits=unlimited',
+  );
   assert.equal(args[args.indexOf('--instance-initiated-shutdown-behavior') + 1], 'terminate');
   assert.ok(args.includes('--disable-api-stop'));
 
@@ -78,6 +127,7 @@ test('launches a tagged disposable workspace', () => {
   assert.equal(network.AssociatePublicIpAddress, true);
   assert.equal(network.DeleteOnTermination, true);
   assert.equal(storage.DeleteOnTermination, true);
+  assert.equal(storage.VolumeSize, 100);
 
   const specifications = JSON.parse(args[args.indexOf('--tag-specifications') + 1]);
   assert.deepEqual(

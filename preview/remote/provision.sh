@@ -16,16 +16,31 @@ apt-get install -y \
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT
 
+case "$(uname -m)" in
+  aarch64)
+    compose_arch=aarch64
+    task_arch=arm64
+    ;;
+  x86_64)
+    compose_arch=x86_64
+    task_arch=amd64
+    ;;
+  *)
+    echo "Unsupported architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
 compose_version=5.1.3
 install -d -m 0755 /usr/local/lib/docker/cli-plugins
 curl -fsSLo /usr/local/lib/docker/cli-plugins/docker-compose \
-  "https://github.com/docker/compose/releases/download/v${compose_version}/docker-compose-linux-x86_64"
+  "https://github.com/docker/compose/releases/download/v${compose_version}/docker-compose-linux-${compose_arch}"
 chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose
 ln -sfn /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
 
 task_version=3.45.5
 curl -fsSLo "$temporary/task.tgz" \
-  "https://github.com/go-task/task/releases/download/v${task_version}/task_linux_amd64.tar.gz"
+  "https://github.com/go-task/task/releases/download/v${task_version}/task_linux_${task_arch}.tar.gz"
 tar -xzf "$temporary/task.tgz" -C /usr/local/bin task
 chmod 0755 /usr/local/bin/task
 
@@ -111,7 +126,10 @@ if ! run_as_preview /usr/local/bin/duranta-preview-stack up; then
   exit 1
 fi
 run_as_preview /usr/local/bin/duranta-preview-stack down
-run_as_preview podman volume rm duranta-preview_blob_data
+run_as_preview podman volume rm \
+  duranta-preview_db_data \
+  duranta-preview_clickhouse_data \
+  duranta-preview_blob_data
 
 rm -f \
   /opt/duranta-preview/app/.env.local \

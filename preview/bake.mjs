@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import { CONFIG } from './config.mjs';
-import { buildAuditTags, tagsToAws } from './lib.mjs';
+import { buildAuditTags, buildCreditSpecificationArgs, tagsToAws } from './lib.mjs';
 
 const execFileAsync = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -83,6 +83,39 @@ async function aws(args, options) {
   return stdout ? JSON.parse(stdout) : {};
 }
 
+export async function waitForImageAvailable(imageId, options = {}) {
+  const awsClient = options.aws ?? aws;
+  const sleep = options.sleep ?? ((delayMs) => new Promise((resolvePromise) => {
+    setTimeout(resolvePromise, delayMs);
+  }));
+  const intervalMs = options.intervalMs ?? 15_000;
+  const maxAttempts = options.maxAttempts ?? 240;
+  let lastState = 'unknown';
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let response;
+    try {
+      response = await awsClient(['ec2', 'describe-images', '--image-ids', imageId]);
+    } catch (error) {
+      const message = String(error?.message ?? error);
+      const retryable = /InvalidAMIID\.NotFound|RequestLimitExceeded|Throttl|ServiceUnavailable|InternalError|RequestTimeout/i.test(message);
+      if (!retryable) throw error;
+      lastState = 'temporarily unavailable';
+      if (attempt < maxAttempts) await sleep(intervalMs);
+      continue;
+    }
+    const image = response.Images?.find((candidate) => candidate.ImageId === imageId);
+    lastState = image?.State ?? 'missing';
+    if (lastState === 'available') return image;
+    if (lastState !== 'pending' && lastState !== 'missing') {
+      throw new Error(`AMI ${imageId} entered terminal state: ${lastState}`);
+    }
+    if (attempt < maxAttempts) await sleep(intervalMs);
+  }
+
+  throw new Error(`AMI ${imageId} was not available after ${maxAttempts} attempts (last state: ${lastState})`);
+}
+
 export function assertExpectedAccount(identity) {
   if (identity?.Account !== CONFIG.accountId) {
     throw new Error(`AWS profile ${CONFIG.profile} is not the Duranta Preview account`);
@@ -134,13 +167,19 @@ async function listManagedImages(awsClient = aws) {
     '--filters',
     `Name=tag:ManagedBy,Values=${CONFIG.managedBy}`,
     'Name=tag:Purpose,Values=golden',
+    `Name=architecture,Values=${CONFIG.architecture}`,
   ]);
-  return (response.Images ?? [])
-    .filter((image) => {
-      const tags = tagsFromAws(image.Tags);
-      return tags.ManagedBy === CONFIG.managedBy && tags.Purpose === 'golden';
-    })
+  return managedImagesForArchitecture(response.Images ?? [])
     .sort((left, right) => String(right.CreationDate).localeCompare(String(left.CreationDate)));
+}
+
+export function managedImagesForArchitecture(images) {
+  return images.filter((image) => {
+    const tags = tagsFromAws(image.Tags);
+    return image.Architecture === CONFIG.architecture
+      && tags.ManagedBy === CONFIG.managedBy
+      && tags.Purpose === 'golden';
+  });
 }
 
 export function selectPruneCandidates(images, protectedImageId) {
@@ -202,7 +241,7 @@ export async function cleanupUnpublishedImage(imageId, options = {}) {
 export function buildAmiName(date, shortSha) {
   const stamp = date.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 13);
   if (!/^[0-9a-f]{7,40}$/i.test(shortSha)) throw new Error('Invalid source commit');
-  return `duranta-preview-main-${stamp}-${shortSha.slice(0, 8).toLowerCase()}`;
+  return `duranta-preview-${CONFIG.architecture}-main-${stamp}-${shortSha.slice(0, 8).toLowerCase()}`;
 }
 
 export function buildBuilderArgs(baseAmi, rootDeviceName, clientToken, auditTags) {
@@ -215,7 +254,8 @@ export function buildBuilderArgs(baseAmi, rootDeviceName, clientToken, auditTags
   return [
     'ec2', 'run-instances',
     '--image-id', baseAmi,
-    '--instance-type', CONFIG.instanceType,
+    '--instance-type', CONFIG.builderInstanceType,
+    ...buildCreditSpecificationArgs(CONFIG.builderInstanceType),
     '--count', '1',
     '--client-token', clientToken,
     '--network-interfaces', JSON.stringify([{
@@ -260,6 +300,7 @@ export function buildCreateImageArgs(instanceId, name, shortSha, auditTags) {
     Name: name,
     ManagedBy: CONFIG.managedBy,
     Purpose: 'golden',
+    Architecture: CONFIG.architecture,
     SourceCommit: shortSha,
     ...auditTags,
   });
@@ -275,11 +316,18 @@ export function buildCreateImageArgs(instanceId, name, shortSha, auditTags) {
   ];
 }
 
+export function validateBaseAmi(image, baseAmi) {
+  if (!image?.RootDeviceName) throw new Error(`Base AMI ${baseAmi} does not have a root device`);
+  if (image.Architecture !== CONFIG.architecture) {
+    throw new Error(`Base AMI ${baseAmi} is ${image.Architecture ?? 'unknown'}, expected ${CONFIG.architecture}`);
+  }
+  return image;
+}
+
 async function resolveBaseAmi() {
   const baseAmi = await getParameter(CONFIG.baseAmiParameter);
   const response = await aws(['ec2', 'describe-images', '--image-ids', baseAmi]);
-  const image = response.Images?.[0];
-  if (!image?.RootDeviceName) throw new Error(`Base AMI ${baseAmi} does not have a root device`);
+  const image = validateBaseAmi(response.Images?.[0], baseAmi);
   return { baseAmi, rootDeviceName: image.RootDeviceName };
 }
 
@@ -465,9 +513,7 @@ async function bake(identity) {
     imageId = created.ImageId;
     if (!imageId) throw new Error('create-image did not return an AMI ID');
 
-    await run('aws', awsArgs(['ec2', 'wait', 'image-available', '--image-ids', imageId]), {
-      timeout: 60 * 60_000,
-    });
+    await waitForImageAvailable(imageId);
     await aws([
       'ssm', 'put-parameter',
       '--name', CONFIG.goldenAmiParameter,

@@ -1,6 +1,6 @@
 # Duranta Preview
 
-This directory manages disposable development machines in the dedicated Preview AWS account. The AWS account, region, network, DNS zone, instance size, and AMI pointer are intentionally fixed in `config.mjs`.
+This directory manages disposable development machines in the dedicated Preview AWS account. The AWS account, region, network, DNS zone, instance sizes, and AMI pointer are intentionally fixed in `config.mjs`.
 
 ## Prerequisites
 
@@ -57,7 +57,7 @@ sudo cat /var/lib/duranta-preview/diagnostics-credentials
 
 ## Lifecycle
 
-- Default host: `m7i.4xlarge`, 200 GiB encrypted gp3 root disk
+- Default workspace: ARM64 `t4g.2xlarge`, 100 GiB encrypted gp3 root disk
 - Default lifetime: 48 hours; maximum 10 active machines per AWS caller
 - Root disk is deleted when the instance terminates
 - EC2 stop is disabled; expiration performs an OS shutdown configured to terminate
@@ -77,7 +77,11 @@ With explicit authorization for the temporary builder cost:
 ./preview/bake.mjs bake
 ```
 
-The command starts one builder with a six-hour deadman, checks out and warms `main`, publishes the new AMI pointer, keeps the two newest managed AMIs, and terminates the builder in `finally`. Run it about weekly or after changing Preview host tooling.
+The command starts one ARM64 `t4g.2xlarge` builder with a six-hour deadman, checks out and warms `main`, publishes the architecture-specific AMI pointer, keeps the two newest ARM64 managed AMIs, and terminates the builder in `finally`. The legacy x86 pointer and images remain available for rollback. Run it about weekly or after changing Preview host tooling.
+
+For an architecture change, bake the new architecture-specific pointer and launch a fresh smoke-test workspace from the same checkout before merging or distributing the CLI change. Until the first ARM64 bake succeeds, `create` fails closed because the ARM64 pointer does not exist; it must never fall back to an incompatible x86 image.
+
+T4g instances run in Unlimited mode so fresh builders and workspaces can burst immediately. Sustained average CPU utilization above the 40% baseline can incur surplus CPU credit charges.
 
 ## Tests
 

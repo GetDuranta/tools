@@ -144,6 +144,12 @@ export function buildAwsArgs(args, { json = true } = {}) {
   return [...base, ...args];
 }
 
+export function buildCreditSpecificationArgs(instanceType) {
+  return /^t\d/.test(instanceType)
+    ? ['--credit-specification', 'CpuCredits=unlimited']
+    : [];
+}
+
 function commandError(args, result) {
   const detail = String(result.stderr || result.stdout || '').trim();
   return new CliError(`aws ${args.join(' ')} failed${detail ? `\n${detail}` : ''}`);
@@ -176,10 +182,11 @@ export function validateGoldenAmi(image, accountId) {
   if (!image || image.State !== 'available') throw new CliError('Golden AMI is not available');
   const tags = tagsFromAws(image.Tags);
   if (image.OwnerId !== accountId
+    || image.Architecture !== CONFIG.architecture
     || tags.ManagedBy !== CONFIG.managedBy
     || tags.Purpose !== 'golden'
     || !image.RootDeviceName) {
-    throw new CliError(`AMI ${image.ImageId} is not a Preview golden AMI owned by this account`);
+    throw new CliError(`AMI ${image.ImageId} is not an ${CONFIG.architecture} Preview golden AMI owned by this account`);
   }
   return image;
 }
@@ -189,7 +196,8 @@ export function buildRunInstancesArgs({ amiId, clientToken, rootDeviceName, tags
   return [
     'ec2', 'run-instances',
     '--image-id', amiId,
-    '--instance-type', CONFIG.instanceType,
+    '--instance-type', CONFIG.workspaceInstanceType,
+    ...buildCreditSpecificationArgs(CONFIG.workspaceInstanceType),
     '--count', '1',
     '--client-token', clientToken,
     '--network-interfaces', JSON.stringify([{
