@@ -9,7 +9,15 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import { CONFIG } from './config.mjs';
-import { buildAuditTags, buildCreditSpecificationArgs, tagsToAws } from './lib.mjs';
+import {
+  assertPreviewAccount,
+  buildAuditTags,
+  buildAwsArgs,
+  buildCreditSpecificationArgs,
+  buildSsmProxyCommand,
+  tagsFromAws,
+  tagsToAws,
+} from './lib.mjs';
 
 const execFileAsync = promisify(execFile);
 const APP_DIR = '/opt/duranta-preview/app';
@@ -60,16 +68,6 @@ export function parseArgs(argv) {
   return { command, help, identity, branch };
 }
 
-function awsArgs(args) {
-  return [
-    '--profile', CONFIG.profile,
-    '--region', CONFIG.region,
-    '--no-cli-pager',
-    '--output', 'json',
-    ...args,
-  ];
-}
-
 async function run(command, args, options = {}) {
   try {
     const result = await execFileAsync(command, args, {
@@ -86,7 +84,7 @@ async function run(command, args, options = {}) {
 }
 
 async function aws(args, options) {
-  const { stdout } = await run('aws', awsArgs(args), options);
+  const { stdout } = await run('aws', buildAwsArgs(args), options);
   return stdout ? JSON.parse(stdout) : {};
 }
 
@@ -123,13 +121,6 @@ export async function waitForImageAvailable(imageId, options = {}) {
   throw new Error(`AMI ${imageId} was not available after ${maxAttempts} attempts (last state: ${lastState})`);
 }
 
-export function assertExpectedAccount(identity) {
-  if (identity?.Account !== CONFIG.accountId) {
-    throw new Error(`AWS profile ${CONFIG.profile} is not the Duranta Preview account`);
-  }
-  return identity;
-}
-
 async function validateLocalTools() {
   const installed = async (command, args) => {
     try {
@@ -148,6 +139,7 @@ async function validateLocalTools() {
 
 // Runs as ubuntu over SSH with agent forwarding; the private clone and LFS pull need the agent.
 export function buildCheckoutCommand(branch = 'main') {
+  const quotedBranch = `'${branch.replaceAll("'", "'\\''")}'`;
   return [
     'set -eu',
     'export DEBIAN_FRONTEND=noninteractive',
@@ -155,7 +147,7 @@ export function buildCheckoutCommand(branch = 'main') {
     'sudo -E apt-get install -y -q git git-lfs',
     'sudo git lfs install --system',
     'sudo install -d -m 0755 -o ubuntu -g ubuntu /opt/duranta-preview',
-    `test -d ${APP_DIR}/.git || GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git clone --branch ${branch} git@github.com:GetDuranta/app.git ${APP_DIR}`,
+    `test -d ${APP_DIR}/.git || GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git clone --branch ${quotedBranch} git@github.com:GetDuranta/app.git ${APP_DIR}`,
     `git -C ${APP_DIR} lfs pull`,
     `git -C ${APP_DIR} lfs fsck`,
   ].join('\n');
@@ -179,10 +171,6 @@ async function optionalParameter(name, awsClient = aws) {
     if (String(error.message).includes('ParameterNotFound')) return null;
     throw error;
   }
-}
-
-function tagsFromAws(tags = []) {
-  return Object.fromEntries(tags.map(({ Key, Value }) => [Key, Value]));
 }
 
 async function listManagedImages(awsClient = aws) {
@@ -381,14 +369,10 @@ async function publicKey(identity) {
   return { value, identityArgs: ['-o', 'IdentitiesOnly=yes', '-i', privatePath] };
 }
 
-function proxyCommand() {
-  return `aws --profile ${CONFIG.profile} --region ${CONFIG.region} ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p`;
-}
-
 function sshArgs(instanceId, identityArgs, knownHosts, remoteCommand) {
   const args = [
     '-A',
-    '-o', `ProxyCommand=${proxyCommand()}`,
+    '-o', `ProxyCommand=${buildSsmProxyCommand()}`,
     '-o', 'StrictHostKeyChecking=accept-new',
     '-o', `UserKnownHostsFile=${knownHosts}`,
     '-o', 'ConnectTimeout=30',
@@ -457,14 +441,14 @@ async function terminateBuilder(instanceId) {
     await aws(['ec2', 'modify-instance-attribute', '--instance-id', instanceId, '--no-disable-api-stop']);
     await aws(['ec2', 'terminate-instances', '--instance-ids', instanceId]);
   }
-  await run('aws', awsArgs(['ec2', 'wait', 'instance-terminated', '--instance-ids', instanceId]), {
+  await run('aws', buildAwsArgs(['ec2', 'wait', 'instance-terminated', '--instance-ids', instanceId]), {
     timeout: 15 * 60_000,
   });
 }
 
 async function bake(identity, branch) {
   await validateLocalTools();
-  const caller = assertExpectedAccount(await aws(['sts', 'get-caller-identity']));
+  const caller = assertPreviewAccount(await aws(['sts', 'get-caller-identity']));
   const { baseAmi, rootDeviceName } = await resolveBaseAmi();
   const key = await publicKey(identity);
   const temporary = await mkdtemp(join(tmpdir(), 'duranta-preview-bake-'));
@@ -488,7 +472,7 @@ async function bake(identity, branch) {
     instanceId = launch.Instances?.[0]?.InstanceId;
     if (!instanceId) throw new Error('run-instances did not return an instance ID');
 
-    await run('aws', awsArgs(['ec2', 'wait', 'instance-running', '--instance-ids', instanceId]), {
+    await run('aws', buildAwsArgs(['ec2', 'wait', 'instance-running', '--instance-ids', instanceId]), {
       timeout: 15 * 60_000,
     });
     const described = await aws(['ec2', 'describe-instances', '--instance-ids', instanceId]);

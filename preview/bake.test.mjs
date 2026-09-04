@@ -1,7 +1,21 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 
-import { cleanupUnpublishedImage, selectPruneCandidates, waitForImageAvailable } from './bake.mjs';
+import { buildCheckoutCommand, cleanupUnpublishedImage, selectPruneCandidates, waitForImageAvailable } from './bake.mjs';
+
+test('checkout passes valid branch names literally through the remote shell', () => {
+  for (const branch of ['vitalii/test$HOME', "vitalii/test'quoted"]) {
+    execFileSync('git', ['check-ref-format', '--branch', branch]);
+    const command = [
+      'sudo() { :; }',
+      'test() { return 1; }',
+      'git() { if [ "$1" = clone ]; then printf "%s\\n" "$3"; fi; }',
+      buildCheckoutCommand(branch),
+    ].join('\n');
+    assert.equal(execFileSync('/bin/sh', ['-c', command], { encoding: 'utf8' }).trim(), branch);
+  }
+});
 
 test('retention keeps two images and never the published one; cleanup deregisters only an unpublished image', async () => {
   const images = [

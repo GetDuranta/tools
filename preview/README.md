@@ -2,7 +2,7 @@
 
 This directory manages disposable development machines in the dedicated Preview AWS account. The AWS account, region, network, DNS zone, instance sizes, and AMI pointer are intentionally fixed in `config.mjs`.
 
-Everything that runs on the machine itself lives in the `app` repository under `tools/preview/` and `compose.preview.yml`; this CLI only creates, connects to, extends, and terminates EC2 instances and bakes the golden AMI.
+Everything that runs on the machine itself lives in the `app` repository under `tools/preview/`; this CLI only creates, connects to, extends, and terminates EC2 instances and bakes the golden AMI.
 
 ## Prerequisites
 
@@ -51,7 +51,7 @@ docker compose ps
 docker compose logs -f backend frontend
 ```
 
-The stack is the regular `compose.yml` from `app` with the `compose.preview.yml` overlay: Traefik terminates TLS with a Let's Encrypt certificate, the backend proxies `/a/` to a compiled frontend bundle without source maps, Logto runs locally, and CVML runs on the CPU from the stock `cvml` service.
+The stack is the regular `compose.yml` from `app` with the `tools/preview/compose.yml` overlay: Traefik terminates TLS with a Let's Encrypt certificate, the backend proxies `/a/` to a compiled frontend bundle without source maps, Logto runs locally, and CVML runs on the CPU from the stock `cvml` service.
 
 Mailpit and Smspit are available at `https://mailpit.<hostname>` and `https://smspit.<hostname>` behind Basic Auth. The generated credentials are on the host:
 
