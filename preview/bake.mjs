@@ -4,23 +4,24 @@ import { randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import { CONFIG } from './config.mjs';
 import { buildAuditTags, buildCreditSpecificationArgs, tagsToAws } from './lib.mjs';
 
 const execFileAsync = promisify(execFile);
-const here = dirname(fileURLToPath(import.meta.url));
+const APP_DIR = '/opt/duranta-preview/app';
 
 const HELP = `Build the Duranta Preview golden AMI
 
 Usage:
-  bake.mjs bake [--identity <private-key>]
+  bake.mjs bake [--identity <private-key>] [--branch <app-branch>]
 
 Options:
   --identity <private-key>  SSH identity loaded in ssh-agent
+  --branch <app-branch>     app branch to bake (default: main)
   --help                    Show help
 `;
 
@@ -29,6 +30,7 @@ export function parseArgs(argv) {
   let commandSeen = false;
   let help = false;
   let identity = null;
+  let branch = 'main';
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -39,6 +41,11 @@ export function parseArgs(argv) {
       const value = inline ?? argv[++index];
       if (!value || value.startsWith('--')) throw new Error('--identity requires a value');
       identity = resolve(value);
+    } else if (token === '--branch' || token.startsWith('--branch=')) {
+      const inline = token.startsWith('--branch=') ? token.slice('--branch='.length) : null;
+      const value = inline ?? argv[++index];
+      if (!value || value.startsWith('--')) throw new Error('--branch requires a value');
+      branch = value;
     } else if (token.startsWith('--')) {
       throw new Error(`Unknown option: ${token}`);
     } else if (commandSeen) {
@@ -50,7 +57,7 @@ export function parseArgs(argv) {
   }
 
   if (command && command !== 'bake') throw new Error(`Unknown command: ${command}`);
-  return { command, help, identity };
+  return { command, help, identity, branch };
 }
 
 function awsArgs(args) {
@@ -136,8 +143,26 @@ async function validateLocalTools() {
     installed('ssh', ['-V']),
     installed('ssh-add', ['-L']),
     installed('session-manager-plugin', []),
-    installed('tar', ['--version']),
   ]);
+}
+
+// Runs as ubuntu over SSH with agent forwarding; the private clone and LFS pull need the agent.
+export function buildCheckoutCommand(branch = 'main') {
+  return [
+    'set -eu',
+    'export DEBIAN_FRONTEND=noninteractive',
+    'sudo -E apt-get update -q',
+    'sudo -E apt-get install -y -q git git-lfs',
+    'sudo git lfs install --system',
+    'sudo install -d -m 0755 -o ubuntu -g ubuntu /opt/duranta-preview',
+    `test -d ${APP_DIR}/.git || GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git clone --branch ${branch} git@github.com:GetDuranta/app.git ${APP_DIR}`,
+    `git -C ${APP_DIR} lfs pull`,
+    `git -C ${APP_DIR} lfs fsck`,
+  ].join('\n');
+}
+
+export function buildProvisionCommand() {
+  return `sudo bash ${APP_DIR}/tools/preview/provision.sh`;
 }
 
 async function getParameter(name, awsClient = aws) {
@@ -239,10 +264,11 @@ export async function cleanupUnpublishedImage(imageId, options = {}) {
   }
 }
 
-export function buildAmiName(date, shortSha) {
+export function buildAmiName(date, shortSha, branch = 'main') {
   const stamp = date.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 13);
   if (!/^[0-9a-f]{7,40}$/i.test(shortSha)) throw new Error('Invalid source commit');
-  return `duranta-preview-${CONFIG.architecture}-main-${stamp}-${shortSha.slice(0, 8).toLowerCase()}`;
+  const label = branch.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  return `duranta-preview-${CONFIG.architecture}-${label}-${stamp}-${shortSha.slice(0, 8).toLowerCase()}`;
 }
 
 export function buildBuilderArgs(baseAmi, rootDeviceName, clientToken, auditTags) {
@@ -296,7 +322,7 @@ export function buildBuilderArgs(baseAmi, rootDeviceName, clientToken, auditTags
   ];
 }
 
-export function buildCreateImageArgs(instanceId, name, shortSha, auditTags) {
+export function buildCreateImageArgs(instanceId, name, shortSha, auditTags, branch = 'main') {
   const tags = tagsToAws({
     Name: name,
     ManagedBy: CONFIG.managedBy,
@@ -308,8 +334,10 @@ export function buildCreateImageArgs(instanceId, name, shortSha, auditTags) {
   return [
     'ec2', 'create-image',
     '--instance-id', instanceId,
+    // A reboot would regenerate the host identity that provision.sh just scrubbed.
+    '--no-reboot',
     '--name', name,
-    '--description', `Duranta Preview golden AMI from main ${shortSha}`,
+    '--description', `Duranta Preview golden AMI from ${branch} ${shortSha}`,
     '--tag-specifications', JSON.stringify([
       { ResourceType: 'image', Tags: tags },
       { ResourceType: 'snapshot', Tags: tags },
@@ -406,26 +434,6 @@ async function spawnChecked(command, args) {
   });
 }
 
-async function uploadRemote(instance, key, identityArgs, knownHosts) {
-  await authorizeSsh(instance, key);
-  const tar = spawn('tar', ['-C', join(here, 'remote'), '-cf', '-', '.'], { stdio: ['ignore', 'pipe', 'inherit'] });
-  const ssh = spawn('ssh', sshArgs(
-    instance.InstanceId,
-    identityArgs,
-    knownHosts,
-    'sudo install -d -m 0755 /tmp/duranta-preview-remote && sudo tar -C /tmp/duranta-preview-remote -xf -',
-  ), { stdio: ['pipe', 'inherit', 'inherit'] });
-  tar.stdout.pipe(ssh.stdin);
-  const wait = (child, name) => new Promise((resolvePromise, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolvePromise();
-      else reject(new Error(`${name} exited with ${code ?? signal}`));
-    });
-  });
-  await Promise.all([wait(tar, 'tar'), wait(ssh, 'ssh upload')]);
-}
-
 async function sshExec(instance, key, identityArgs, knownHosts, remoteCommand, capture = false) {
   await authorizeSsh(instance, key);
   const args = sshArgs(instance.InstanceId, identityArgs, knownHosts, remoteCommand);
@@ -454,7 +462,7 @@ async function terminateBuilder(instanceId) {
   });
 }
 
-async function bake(identity) {
+async function bake(identity, branch) {
   await validateLocalTools();
   const caller = assertExpectedAccount(await aws(['sts', 'get-caller-identity']));
   const { baseAmi, rootDeviceName } = await resolveBaseAmi();
@@ -488,28 +496,23 @@ async function bake(identity) {
     if (!instance?.Placement?.AvailabilityZone) throw new Error(`Could not describe builder ${instanceId}`);
 
     await waitForSsm(instanceId);
-    await uploadRemote(instance, key.value, key.identityArgs, knownHosts);
-    await sshExec(
-      instance,
-      key.value,
-      key.identityArgs,
-      knownHosts,
-      'sudo --preserve-env=SSH_AUTH_SOCK bash /tmp/duranta-preview-remote/provision.sh',
-    );
+    await sshExec(instance, key.value, key.identityArgs, knownHosts, buildCheckoutCommand(branch));
+    await sshExec(instance, key.value, key.identityArgs, knownHosts, buildProvisionCommand());
     const shortSha = await sshExec(
       instance,
       key.value,
       key.identityArgs,
       knownHosts,
-      'git -C /opt/duranta-preview/app rev-parse --short=8 HEAD',
+      `git -C ${APP_DIR} rev-parse --short=8 HEAD`,
       true,
     );
-    const name = buildAmiName(new Date(), shortSha);
+    const name = buildAmiName(new Date(), shortSha, branch);
     const created = await aws(buildCreateImageArgs(
       instanceId,
       name,
       shortSha,
       buildAuditTags(caller),
+      branch,
     ));
     imageId = created.ImageId;
     if (!imageId) throw new Error('create-image did not return an AMI ID');
@@ -547,7 +550,7 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(HELP);
     return;
   }
-  await bake(options.identity);
+  await bake(options.identity, options.branch);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

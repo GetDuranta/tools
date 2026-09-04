@@ -1,7 +1,0 @@
-[Unit]
-Description=Terminate an expired Duranta preview
-After=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/duranta-preview-expiry

@@ -251,20 +251,20 @@ export function workspaceResourceIds(instance) {
   ].filter(Boolean);
 }
 
+// The 90-minute shutdown is the only TTL fallback if bootstrap never finishes; bootstrap reschedules it.
 export function buildBootstrapUserData({ hostname, expiration }) {
   return [
     '#!/bin/sh',
-    'set -u',
-    '/usr/local/bin/duranta-preview-bootstrap \\',
-    `  --hostname ${hostname} \\`,
-    `  --expires-at ${expiration}`,
-    'status=$?',
-    '[ "$status" -eq 0 ] && exit 0',
-    'logger -t duranta-preview "bootstrap failed with status $status; terminating" 2>/dev/null || true',
-    'shutdown -h now || systemctl poweroff --no-block',
-    'exit "$status"',
+    'shutdown -h +90',
+    `/opt/duranta-preview/app/tools/preview/bootstrap.sh --hostname ${hostname} --expires-at ${expiration} || { logger -t duranta-preview "bootstrap failed"; shutdown -h now; exit 1; }`,
     '',
   ].join('\n');
+}
+
+export function minutesUntil(expiration, now = new Date()) {
+  const deadline = new Date(expiration);
+  if (!Number.isFinite(deadline.getTime())) throw new CliError(`Invalid expiration: ${expiration}`);
+  return Math.max(1, Math.ceil((deadline.getTime() - now.getTime()) / 60000));
 }
 
 function dnsRecordSets(hostname, publicIp) {

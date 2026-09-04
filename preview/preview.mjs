@@ -29,6 +29,7 @@ import {
   expiresAt,
   extendExpiration,
   isManagedResource,
+  minutesUntil,
   normalizeDnsLabel,
   normalizeOwner,
   parseDuration,
@@ -186,21 +187,12 @@ export async function waitForPreview(hostname, timeoutMs = 45 * 60 * 1000, depen
   let lastError = 'not attempted';
   while (now() < deadline) {
     try {
-      const marker = await fetchImpl(`https://${hostname}/__preview/ready`, {
+      const app = await fetchImpl(`https://${hostname}/a/`, {
         redirect: 'manual',
         signal: AbortSignal.timeout(10000),
       });
-      const markerBody = await marker.text();
-      if (marker.status !== 200 || markerBody !== 'ready\n') {
-        lastError = `readiness marker returned HTTP ${marker.status} with an unexpected body`;
-      } else {
-        const app = await fetchImpl(`https://${hostname}/a/`, {
-          redirect: 'manual',
-          signal: AbortSignal.timeout(10000),
-        });
-        if (app.status === 200) return;
-        lastError = `public app returned HTTP ${app.status}`;
-      }
+      if (app.status === 200) return;
+      lastError = `public app returned HTTP ${app.status}`;
     } catch (error) {
       lastError = error.message;
     }
@@ -276,7 +268,7 @@ async function createPreview(aws, issue, options) {
     throw new CliError(`${error.message}\n${cleanup}`);
   }
 
-  console.log(`URL: https://${hostname}/`);
+  console.log(`URL: https://${hostname}/a/`);
   console.log(`SSH: preview.mjs connect ${hostname}`);
   console.log(`Expires: ${expiration}`);
 }
@@ -356,7 +348,7 @@ function extendPreview(aws, name, duration, options) {
   const instance = resolveManagedInstance(aws, name);
   const expiration = extendExpiration(findTag(instance, 'ExpiresAt'), duration);
   runSsh(aws, instance, options, [
-    'sudo', '/usr/local/bin/duranta-preview-expiry', 'set', expiration,
+    `sudo shutdown -c || true; sudo shutdown -h +${minutesUntil(expiration)}`,
   ], { capture: true });
   aws.run([
     'ec2', 'create-tags',
