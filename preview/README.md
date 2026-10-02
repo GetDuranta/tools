@@ -61,7 +61,7 @@ cat /opt/duranta-preview/diagnostics-credentials
 
 ## Lifecycle
 
-- Default workspace: ARM64 `t4g.2xlarge`, 100 GiB encrypted gp3 root disk
+- Default workspace: ARM64 `m8g.2xlarge` (Graviton4, 8 vCPU, 32 GiB), 100 GiB encrypted gp3 root disk
 - Workspace root volumes initialize from the golden snapshot at 300 MiB/s; AWS charges for provisioned initialization per snapshot GiB
 - Default lifetime: 48 hours; maximum 10 active machines per AWS caller
 - Root disk is deleted when the instance terminates
@@ -81,13 +81,13 @@ With explicit authorization for the temporary builder cost:
 ./preview/bake.mjs bake
 ```
 
-The command starts one ARM64 `t4g.2xlarge` builder with a six-hour deadman, clones `main` of `app` with its Git LFS model artifacts, runs `tools/preview/provision.sh` from that checkout (Docker Engine, image builds, a warm-up run of the stack, cleanup of data volumes and host identity), publishes the architecture-specific AMI pointer, keeps the two newest ARM64 managed AMIs, and terminates the builder in `finally`. Run it about weekly or after changing the host tooling in `app`.
+The command starts one ARM64 `m8g.2xlarge` builder with a six-hour deadman, clones `main` of `app` with its Git LFS model artifacts, runs `tools/preview/provision.sh` from that checkout (Docker Engine, image builds, a warm-up run of the stack, cleanup of data volumes and host identity), publishes the architecture-specific AMI pointer, keeps the two newest ARM64 managed AMIs, and terminates the builder in `finally`. Run it about weekly or after changing the host tooling in `app`.
 
 An AMI stores the checkout, the built images, and the build caches, not a running stack. Every new workspace starts the stack and loads the CVML models again.
 
 AMIs baked before the move of the host tooling into `app` do not contain `tools/preview/bootstrap.sh`; `create` from such a pointer fails: user data cannot find the script and shuts the machine down. Bake once after merging the `app` side before using this CLI. `create` never falls back to an image of another architecture.
 
-T4g instances run in Unlimited mode so fresh builders and workspaces can burst immediately. Sustained average CPU utilization above the 40% baseline can incur surplus CPU credit charges.
+Workspaces and builders use Graviton4 (`m8g`), not burstable `t4g`: CPU CVML keeps all cores busy for a minute or more per request, and Graviton3+ has the bf16 instructions the Preview CVML relies on. `c8g.2xlarge` is cheaper but has 16 GiB, not enough for CVML. If the instance type is ever set back to a `t` family, the CLI launches it in Unlimited mode.
 
 ## Tests
 
