@@ -42,7 +42,7 @@ import {
 const HELP = `Duranta Preview EC2 environments
 
 Usage:
-  preview.mjs create <issue> [--owner <name>] [--ttl <duration>]
+  preview.mjs create <issue> [--owner <name>] [--ttl <duration>] [--identity <key>]
   preview.mjs list
   preview.mjs connect <name> [--identity <key>] [--forward-agent]
   preview.mjs extend <name> <duration> [--identity <key>]
@@ -201,6 +201,22 @@ export async function waitForPreview(hostname, timeoutMs = 45 * 60 * 1000, depen
   throw new CliError(`Preview was not fully ready after ${Math.ceil(timeoutMs / 60000)} minutes (${lastError})`);
 }
 
+// /a/ answers while bootstrap is still bringing up the remaining services. Wait for cloud-init to finish,
+// otherwise a user's `docker compose up` races bootstrap's own compose call and its failure handler powers the host off.
+export const BOOTSTRAP_WAIT_SCRIPT = [
+  'cloud-init status --wait >/dev/null 2>&1',
+  'if sudo journalctl -t duranta-preview --no-pager | grep -q "bootstrap failed"; then echo "bootstrap failed (see: journalctl -t duranta-preview)"; exit 1; fi',
+  'cloud-init status | grep -q "status: done"',
+].join('; ');
+
+function waitForBootstrap(aws, instance, options) {
+  try {
+    runSsh(aws, instance, options, [BOOTSTRAP_WAIT_SCRIPT], { capture: true, timeout: 30 * 60 * 1000 });
+  } catch (error) {
+    throw new CliError(`Preview bootstrap did not finish successfully: ${error.message}`);
+  }
+}
+
 async function createPreview(aws, issue, options) {
   const identity = callerIdentity(aws);
   assertVolumeInitializationRateSupport(aws.run([
@@ -258,6 +274,7 @@ async function createPreview(aws, issue, options) {
     }
     aws.run(['ec2', 'wait', 'instance-status-ok', '--instance-ids', instanceId], { timeout: 900000 });
     await waitForPreview(hostname);
+    waitForBootstrap(aws, instance, options);
   } catch (error) {
     let cleanup = `Terminated failed Preview ${instanceId}.`;
     try {
@@ -309,7 +326,7 @@ function injectSshKey(aws, instance, options) {
   return key;
 }
 
-function runSsh(aws, instance, options, remoteArgs = [], { capture = false, forwardAgent = false } = {}) {
+function runSsh(aws, instance, options, remoteArgs = [], { capture = false, forwardAgent = false, timeout = 120000 } = {}) {
   const key = injectSshKey(aws, instance, options);
   let temporaryDirectory;
   let identityFile = key.identityFile;
@@ -320,7 +337,7 @@ function runSsh(aws, instance, options, remoteArgs = [], { capture = false, forw
   }
   try {
     const result = spawnSync('ssh', buildSshArgs(instance, identityFile, remoteArgs, { forwardAgent }), capture
-      ? { encoding: 'utf8', timeout: 120000 }
+      ? { encoding: 'utf8', timeout }
       : { stdio: 'inherit' });
     if (result.error) throw new CliError(`Unable to run ssh: ${result.error.message}`);
     if (result.status !== 0) {
@@ -395,8 +412,8 @@ export async function main(argv = process.argv.slice(2)) {
   const aws = new AwsCli();
   switch (command) {
     case 'create':
-      allowOptions(options, ['owner', 'ttl']);
-      requirePositionals(command, positionals, 1, 'create <issue> [--owner <name>] [--ttl <duration>]');
+      allowOptions(options, ['owner', 'ttl', 'identity']);
+      requirePositionals(command, positionals, 1, 'create <issue> [--owner <name>] [--ttl <duration>] [--identity <key>]');
       await createPreview(aws, positionals[0], options);
       break;
     case 'list':
