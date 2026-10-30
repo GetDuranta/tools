@@ -4,15 +4,16 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"os"
+	"os/exec"
+	"path"
+	"syscall"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/frioux/shellquote"
 	"github.com/spf13/cobra"
-	"os"
-	"os/exec"
-	"path"
-	"syscall"
 )
 
 //go:embed "rds-ca-certs.pem"
@@ -22,6 +23,8 @@ type SqlConfig struct {
 	Username    string
 	Readonly    bool
 	PrintScript bool
+	LongDsn     bool
+	Permissive  bool
 }
 
 func GetSqlCommand(globalCfg *GlobalConfig) *cobra.Command {
@@ -76,11 +79,21 @@ func GetSqlCommand(globalCfg *GlobalConfig) *cobra.Command {
 				return fmt.Errorf("failed to create authentication token: %v", err)
 			}
 
-			dsn := fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslrootcert=%s sslmode=verify-full",
-				*db.Endpoint, *db.Port, sqlConfig.Username, dbName, certPath,
-			)
+			dsn := fmt.Sprintf("host=%s port=%d user=%s dbname=%s",
+				*db.Endpoint, *db.Port, sqlConfig.Username, dbName)
 
-			if sqlConfig.PrintScript {
+			if sqlConfig.Permissive {
+				dsn += " sslmode=allow"
+			} else {
+				dsn += fmt.Sprintf(" sslrootcert=%s sslmode=verify-full", certPath)
+			}
+
+			if sqlConfig.LongDsn {
+				dsn += " password=" + dbToken
+				fmt.Printf("%s\n", dsn)
+				return nil
+
+			} else if sqlConfig.PrintScript {
 				fmt.Printf("export PGPASSWORD=\"%s\"\n", dbToken)
 				fmt.Printf("export DSN=\"%s\"\n", dsn)
 				return nil
@@ -111,6 +124,10 @@ func GetSqlCommand(globalCfg *GlobalConfig) *cobra.Command {
 		"connect to the read-only endpoint")
 	sqlCommand.Flags().BoolVar(&sqlConfig.PrintScript, "print-script", false,
 		"print the connection script")
+	sqlCommand.Flags().BoolVar(&sqlConfig.LongDsn, "print-long-dsn", false,
+		"print the long connection string")
+	sqlCommand.Flags().BoolVar(&sqlConfig.Permissive, "permissive-tls", false,
+		"use permissive TLS settings (no CA validation)")
 	sqlCommand.Flags().SetInterspersed(false)
 
 	return sqlCommand
