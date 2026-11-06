@@ -251,11 +251,37 @@ export function workspaceResourceIds(instance) {
   ].filter(Boolean);
 }
 
+// A reboot clears any scheduled shutdown, so every later boot re-arms it from the ExpiresAt tag that extend updates.
+const REARM_EXPIRY = `#!/bin/sh
+imds=http://169.254.169.254/latest
+token=$(curl -sf --retry 10 --retry-connrefused -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' $imds/api/token) &&
+expires=$(curl -sf --retry 10 --retry-connrefused -H "X-aws-ec2-metadata-token: $token" $imds/meta-data/tags/instance/ExpiresAt) &&
+minutes=$(( ($(date -d "$expires" +%s) - $(date +%s) + 59) / 60 )) || minutes=90
+if [ "$minutes" -gt 0 ]; then shutdown -h +"$minutes"; else shutdown -h now; fi
+`;
+
+const REARM_UNIT = `[Unit]
+Description=Re-arm the Duranta preview expiry shutdown
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/duranta-preview-rearm-expiry
+
+[Install]
+WantedBy=multi-user.target
+`;
+
 // The 90-minute shutdown is the only TTL fallback if bootstrap never finishes; bootstrap reschedules it.
 export function buildBootstrapUserData({ hostname, expiration }) {
   return [
     '#!/bin/sh',
     'shutdown -h +90',
+    `cat > /usr/local/sbin/duranta-preview-rearm-expiry <<'EOF'\n${REARM_EXPIRY}EOF`,
+    'chmod 0755 /usr/local/sbin/duranta-preview-rearm-expiry',
+    `cat > /etc/systemd/system/duranta-preview-rearm-expiry.service <<'EOF'\n${REARM_UNIT}EOF`,
+    'systemctl enable duranta-preview-rearm-expiry.service',
     `/opt/duranta-preview/app/tools/preview/bootstrap.sh --hostname ${hostname} --expires-at ${expiration} || { logger -t duranta-preview "bootstrap failed"; shutdown -h now; exit 1; }`,
     '',
   ].join('\n');
