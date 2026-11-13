@@ -65,7 +65,7 @@ cat /opt/duranta-preview/diagnostics-credentials
 - Workspace root volumes initialize from the golden snapshot at 300 MiB/s; AWS charges for provisioned initialization per snapshot GiB
 - Default lifetime: 48 hours; maximum 10 active machines per AWS caller
 - Root disk is deleted when the instance terminates
-- EC2 stop is disabled; the lifetime is a scheduled OS `shutdown`, and the instance is configured to terminate on shutdown. `extend` reschedules that shutdown and updates the `ExpiresAt` tag
+- EC2 stop is disabled; the lifetime is a scheduled OS `shutdown`, and the instance is configured to terminate on shutdown. `extend` reschedules that shutdown and updates the `ExpiresAt` tag. A reboot clears the schedule, so a boot unit re-arms it from that tag (or shuts down if it already passed)
 - User data schedules a 90-minute safety shutdown before bootstrap starts; bootstrap replaces it with the requested lifetime once the stack is up, and a failed bootstrap shuts the machine down immediately
 - Expiration may leave two stale DNS records; a later create replaces them, while explicit terminate deletes the exact records best-effort
 - Every taggable per-run resource carries `CreatorId`, human-readable `CreatedBy`, ISO `CreatedAt`, `ManagedBy`, and `Purpose`; workspace disks and ENIs also carry the hostname and expiry
