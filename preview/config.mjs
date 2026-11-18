@@ -10,7 +10,7 @@ export const CONFIG = Object.freeze({
   architecture: 'arm64',
   workspaceInstanceType: 'm8g.2xlarge',
   builderInstanceType: 'm8g.2xlarge',
-  volumeSize: 100,
+  volumeSize: 200,
   volumeInitializationRate: 300,
   sshUser: 'ubuntu',
   ttl: '48h',

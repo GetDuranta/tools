@@ -61,7 +61,7 @@ cat /opt/duranta-preview/diagnostics-credentials
 
 ## Lifecycle
 
-- Default workspace: ARM64 `m8g.2xlarge` (Graviton4, 8 vCPU, 32 GiB), 100 GiB encrypted gp3 root disk
+- Default workspace: ARM64 `m8g.2xlarge` (Graviton4, 8 vCPU, 32 GiB), 200 GiB encrypted gp3 root disk
 - Workspace root volumes initialize from the golden snapshot at 300 MiB/s; AWS charges for provisioned initialization per snapshot GiB
 - Default lifetime: 48 hours; maximum 10 active machines per AWS caller
 - Root disk is deleted when the instance terminates
